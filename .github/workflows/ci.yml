@@ -1,0 +1,68 @@
+name: CI
+
+# develop / main / 作業ブランチへの push と、develop 向け PR で実行する。
+on:
+  push:
+    branches: [main, develop, "claude/**", "feature/**"]
+  pull_request:
+    branches: [develop, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ---- 中核ロジック(ハードウェア非依存)のホスト検証。実機不要で CI 完結。 ----
+  core:
+    name: core (host test / clippy / fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check (workspace)
+        run: cargo fmt --all --check
+
+      - name: Clippy (core)
+        run: cargo clippy -p pico-temp-core --all-targets -- -D warnings
+
+      - name: Unit tests (core)
+        run: cargo test -p pico-temp-core
+
+  # ---- firmware のクロスコンパイル確認(thumbv6m)。CYW43 blob 無しでビルドできる ----
+  # ---- skip-cyw43-firmware フィーチャで、コードが組込みターゲットで通ることを検証する。 ----
+  firmware:
+    name: firmware (thumbv6m build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (thumbv6m)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware
+
+      - name: Format check (firmware)
+        run: cargo fmt --check
+
+      - name: Clippy (firmware, skip-cyw43-firmware)
+        run: cargo clippy --features skip-cyw43-firmware -- -D warnings
+
+      - name: Build (firmware, skip-cyw43-firmware)
+        run: cargo build --release --features skip-cyw43-firmware

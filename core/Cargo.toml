@@ -1,0 +1,25 @@
+[package]
+name = "pico-temp-core"
+version = "0.1.0"
+description = "DS18B20 温度変換・CRC・BLE Environmental Sensing エンコードのハードウェア非依存ロジック"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+# no_std ライブラリ。ホストのテスト時のみ std を利用する。
+name = "pico_temp_core"
+
+[dependencies]
+
+[features]
+default = []
+# defmt を有効化すると、firmware 側で defmt ログにエラー型を出力できる。
+defmt = ["dep:defmt"]
+
+[dependencies.defmt]
+version = "1.0"
+optional = true
+
+[dev-dependencies]
