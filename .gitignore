@@ -1,0 +1,20 @@
+# Rust / Cargo
+/target/
+**/target/
+Cargo.lock.orig
+*.rs.bk
+
+# CYW43 firmware blobs (ローカルで取得。バイナリはコミットしない)
+/firmware/cyw43-firmware/*.bin
+
+# probe-rs / debug
+*.elf
+*.uf2
+*.bin.tmp
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
