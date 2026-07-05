@@ -110,13 +110,28 @@ impl<'d> Ds18b20<'d> {
         byte
     }
 
+    /// reset でプレゼンスパルスが得られなかったときのエラー種別を、バスレベルから判定する。
+    ///
+    /// - バスが High（外部プルアップで釣られている＝バス開放）: [`Ds18b20Error::Disconnected`]
+    /// - バスが Low に張り付いている（ショート/電源不良等）: [`Ds18b20Error::NoResponse`]
+    ///
+    /// これにより `specification.md` の「バス開放時 = Disconnected」と分類を一致させ、
+    /// 実配線のトラブルシュートに使えるようにする。
+    fn absence_error(&mut self) -> Ds18b20Error {
+        if self.sample() {
+            Ds18b20Error::Disconnected
+        } else {
+            Ds18b20Error::NoResponse
+        }
+    }
+
     /// 温度を 1 回測定して返す。
     ///
     /// 手順: リセット → Skip ROM → Convert T → 変換待ち → リセット →
     /// Skip ROM → Read Scratchpad → 9 バイト読み出し → CRC 検証・変換。
     pub async fn read(&mut self) -> Result<Temperature, Ds18b20Error> {
         if !self.reset() {
-            return Err(Ds18b20Error::NoResponse);
+            return Err(self.absence_error());
         }
         self.write_byte(CMD_SKIP_ROM);
         self.write_byte(CMD_CONVERT_T);
@@ -125,7 +140,7 @@ impl<'d> Ds18b20<'d> {
         Timer::after_millis(CONVERSION_TIME_MS).await;
 
         if !self.reset() {
-            return Err(Ds18b20Error::NoResponse);
+            return Err(self.absence_error());
         }
         self.write_byte(CMD_SKIP_ROM);
         self.write_byte(CMD_READ_SCRATCHPAD);

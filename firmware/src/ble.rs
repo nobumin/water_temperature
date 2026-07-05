@@ -112,7 +112,7 @@ async fn advertise<'values, 'server, C: Controller>(
     };
 
     let mut adv_data = [0u8; 31];
-    let len = AdStructure::encode_slice(
+    let len = match AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             AdStructure::ServiceData16 {
@@ -122,10 +122,16 @@ async fn advertise<'values, 'server, C: Controller>(
             AdStructure::CompleteLocalName(DEVICE_NAME.as_bytes()),
         ],
         &mut adv_data[..],
-    )
-    .ok()?;
+    ) {
+        Ok(len) => len,
+        Err(e) => {
+            // 例: AD 構造が 31 バイトを超えた等。原因追跡のためログを残す。
+            warn!("[adv] encode error: {:?}", defmt::Debug2Format(&e));
+            return None;
+        }
+    };
 
-    let advertiser = peripheral
+    let advertiser = match peripheral
         .advertise(
             &Default::default(),
             Advertisement::ConnectableScannableUndirected {
@@ -134,7 +140,14 @@ async fn advertise<'values, 'server, C: Controller>(
             },
         )
         .await
-        .ok()?;
+    {
+        Ok(advertiser) => advertiser,
+        Err(e) => {
+            // 無線初期化/設定ミス等の切り分けのためログを残す。
+            warn!("[adv] advertise error: {:?}", defmt::Debug2Format(&e));
+            return None;
+        }
+    };
 
     match select(advertiser.accept(), Timer::after_secs(ADV_REFRESH_SECS)).await {
         Either::First(Ok(conn)) => {
