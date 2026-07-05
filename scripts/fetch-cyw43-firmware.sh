@@ -12,12 +12,23 @@ BASE="https://raw.githubusercontent.com/embassy-rs/embassy/${REV}/cyw43-firmware
 
 mkdir -p "$DEST"
 
+failed=()
 for f in 43439A0.bin 43439A0_clm.bin 43439A0_btfw.bin nvram_rp2040.bin; do
   echo "downloading ${f} ..."
   if ! curl -fsSL "${BASE}/${f}" -o "${DEST}/${f}"; then
-    echo "warning: ${f} を取得できませんでした(この rev に存在しない可能性)。" >&2
+    echo "error: ${f} を取得できませんでした。" >&2
+    failed+=("${f}")
   fi
 done
 
-echo "done -> ${DEST}"
 ls -l "${DEST}"
+
+# 1 つでも取得に失敗したら非 0 で終了する
+# (blob 不足のままビルドへ進み include_bytes! で失敗するのを防ぐ)。
+if (( ${#failed[@]} > 0 )); then
+  echo "failed to download: ${failed[*]}" >&2
+  echo "取得に失敗した blob があります。ネットワークや rev(${REV}) を確認してください。" >&2
+  exit 1
+fi
+
+echo "done -> ${DEST}"
