@@ -16,7 +16,8 @@ use pico_temp_core::ess::ESS_SERVICE_UUID;
 use portable_atomic::{AtomicI16, Ordering};
 use trouble_host::prelude::*;
 
-/// 「未測定」を表す番兵値。センサ未応答時はアドバタイズに温度を載せない。
+/// 「未測定」を表す番兵値。この値のときはアドバタイズの Service Data に温度 0 を載せる
+/// （Service Data 自体は常に付与する）。
 pub const NO_READING: i16 = i16::MIN;
 
 /// センサタスクが書き込み、BLE タスクが読み出す最新温度(センチ℃)。
@@ -48,8 +49,9 @@ struct EnvironmentalSensingService {
 
 /// BLE スタックを起動し、アドバタイズ／GATT を永続的に実行する。
 pub async fn run<C: Controller>(controller: C) {
-    // テスト用途に固定のランダムアドレスを用いる。
-    let address: Address = Address::random([0x42, 0x6d, 0x75, 0x70, 0x69, 0x63]);
+    // テスト用途に固定の静的ランダムアドレスを用いる。
+    // BLE 仕様上、静的ランダムアドレスは最上位バイト(配列末尾)の上位 2bit が 11 である必要がある。
+    let address: Address = Address::random([0x42, 0x6d, 0x75, 0x70, 0x69, 0xE3]);
     info!("BLE address = {:?}", address);
 
     let mut resources: HostResources<_, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =

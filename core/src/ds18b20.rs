@@ -122,7 +122,7 @@ pub enum Ds18b20Error {
     CrcMismatch {
         /// スクラッチパッド byte8 に格納されていた CRC。
         expected: u8,
-        /// byte0..8 から計算した CRC。
+        /// byte0〜7 の 8 バイトから計算した CRC。
         computed: u8,
     },
 }
