@@ -1,0 +1,17 @@
+# Raspberry Pi Pico W (RP2040 / Cortex-M0+) 向けビルド設定。
+[build]
+target = "thumbv6m-none-eabi"
+
+[target.thumbv6m-none-eabi]
+# 実機書き込み・ログ表示は probe-rs 経由(デバッグプローブ接続時)。
+# UF2 で書き込む場合は environment.md 参照。
+runner = "probe-rs run --chip RP2040"
+rustflags = [
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tlink-rp.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+[env]
+DEFMT_LOG = "info"

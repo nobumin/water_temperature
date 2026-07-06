@@ -1,0 +1,63 @@
+[package]
+name = "pico-temperature-firmware"
+version = "0.1.0"
+description = "Raspberry Pi Pico W 向け DS18B20 温度 BLE ファームウェア"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/nobumin/water_temperature"
+resolver = "2"
+
+[dependencies]
+# 中核ロジック(温度変換・CRC・ESS エンコード)。ホストでテスト済み。
+pico-temp-core = { path = "../core", features = ["defmt"] }
+
+# embassy (RP2040)
+embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.5.1", default-features = false, features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.10", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-futures = "0.1.2"
+embassy-sync = { version = "0.8", features = ["defmt"] }
+
+# BLE: CYW43439 (Pico W) + trouble-host
+cyw43 = { version = "0.7.0", features = ["defmt", "firmware-logs", "bluetooth"] }
+cyw43-pio = { version = "0.10.0", features = ["defmt"] }
+# rev は指定せず Cargo.lock で固定する(commit 済みの Cargo.lock が再現性を担保)。
+# trouble 公式 rp-pico-w 例と同じ embassy rev(下記 patch)に揃うよう main を追従する。
+trouble-host = { git = "https://github.com/embassy-rs/trouble.git", features = ["peripheral", "gatt", "derive", "defmt", "default-packet-pool", "default-packet-pool-mtu-128"] }
+
+# ロギング・パニック
+defmt = "1.0"
+defmt-rtt = "1.0"
+panic-probe = { version = "1.0", features = ["print-defmt"] }
+
+# Cortex-M ランタイム
+cortex-m = { version = "0.7.6", features = ["inline-asm"] }
+cortex-m-rt = "0.7.0"
+static_cell = "2"
+portable-atomic = { version = "1.5", features = ["critical-section"] }
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+embedded-hal-async = "1.0"
+critical-section = "1.1"
+
+[features]
+default = []
+# CYW43 ファームウェア blob が未取得の環境でも `cargo check` できるようにするスタブ。
+# 実機書き込み時は指定しないこと(本物のファームウェアが必要)。
+skip-cyw43-firmware = []
+
+[patch.crates-io]
+# trouble-host の公式 rp-pico-w 例と同じ embassy リビジョンに固定する。
+cyw43 = { version = "0.7.0", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+cyw43-pio = { version = "0.10.0", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-rp = { version = "0.10.0", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-sync = { version = "0.8.0", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-executor = { version = "0.10.0", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-time = { version = "0.5.1", git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+debug = 2
+
+[profile.dev]
+opt-level = "s"

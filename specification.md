@@ -1,0 +1,169 @@
+# specification.md — 詳細仕様
+
+DS18B20 温度センサを Raspberry Pi Pico W に接続し、測定温度を BLE でスマートフォンへ
+提供するファームウェアの詳細仕様。
+
+## 1. システム概要
+
+```
++-----------+ 1-Wire  +----------------+   BLE(2.4GHz)   +-------------+
+| DS18B20   |<------->| Raspberry Pi   |  ~~~~~~~~~~~~~>  | Smartphone  |
+| (温度)    | GPIO15  | Pico W (RP2040 |                 | (nRF Connect|
+|           |         |  + CYW43439)   |                 |  等)        |
++-----------+         +----------------+                 +-------------+
+```
+
+- DS18B20 を 1-Wire で定期測定（既定 2 秒周期）。
+- 最新温度を 2 通りで提供:
+  1. **非接続アドバタイズ**: アドバタイズパケットの Service Data に温度を載せる。
+  2. **接続型 GATT**: Environmental Sensing Service の Temperature 特性で Read / Notify。
+
+## 2. ハードウェア構成
+
+### 2.1 使用部品
+
+| 部品 | 型番/仕様 |
+| --- | --- |
+| マイコンボード | Raspberry Pi Pico W（RP2040 + CYW43439、無線必須） |
+| 温度センサ | DS18B20（1-Wire, -55〜+125℃, 9〜12bit） |
+| プルアップ抵抗 | 4.7kΩ（データ線 ⇔ 3.3V） |
+
+### 2.2 配線
+
+| DS18B20 ピン | 接続先（Pico W） |
+| --- | --- |
+| GND | GND（例: 物理 38 番ピン） |
+| DQ（データ） | GPIO15（物理 20 番ピン）※4.7kΩ で 3V3 へプルアップ |
+| VDD | 3V3(OUT)（物理 36 番ピン） |
+
+```
+        3V3(OUT) ----+----[ 4.7kΩ ]----+
+                     |                 |
+   DS18B20.VDD ------+                 |
+   DS18B20.DQ  ---------------------- GPIO15
+   DS18B20.GND ------------------------ GND
+```
+
+> 寄生電源（VDD を GND に接続）ではなく、**通常電源（VDD=3V3）** を前提とする。
+
+### 2.3 GPIO 割り当て
+
+| 機能 | GPIO |
+| --- | --- |
+| DS18B20 データ（1-Wire） | GPIO15 |
+| CYW43 PWR | GPIO23（ボード内部） |
+| CYW43 CS | GPIO25（ボード内部） |
+| CYW43 DIO | GPIO24（ボード内部） |
+| CYW43 CLK | GPIO29（ボード内部） |
+
+## 3. ソフトウェア構成
+
+Cargo ワークスペース。
+
+| クレート | 種別 | 説明 |
+| --- | --- | --- |
+| `core`（`pico-temp-core`） | `no_std` lib | ハードウェア非依存ロジック。ホストで単体テスト可能。 |
+| `firmware`（`pico-temperature-firmware`） | 組込みバイナリ | Pico W 実機向け（`thumbv6m-none-eabi`）。 |
+
+### 3.1 `core` クレート
+
+- `ds18b20` モジュール
+  - `crc8(&[u8]) -> u8`: Dallas/Maxim 1-Wire CRC8（多項式 0x8C 反射, 初期値 0）。
+  - `Scratchpad`: 9 バイトのスクラッチパッド。`temperature()` で CRC 検証と温度変換。
+  - `Temperature`: 1/16 ℃ 生値を保持。`centi_celsius()` / `milli_celsius()` / `to_ess_bytes()`。
+  - `Ds18b20Error`: `Disconnected`(全 0xFF) / `NoResponse`(全 0x00) / `CrcMismatch`。
+- `ess` モジュール
+  - `ESS_SERVICE_UUID = 0x181A`, `TEMPERATURE_CHAR_UUID = 0x2A6E`。
+  - `advertisement_service_data(Temperature) -> [u8; 6]`: Service Data AD 構造。
+
+### 3.2 `firmware` クレート
+
+- `main.rs`: embassy executor 起動、DS18B20 タスク、CYW43 初期化、BLE 起動。
+- `onewire.rs`: 1-Wire ビットバンギング DS18B20 ドライバ（`critical_section` でスロット保護）。
+- `ble.rs`: `trouble-host` によるアドバタイズ + GATT ESS。
+
+依存の要点（`firmware/Cargo.toml`、Cargo.lock で固定）:
+- embassy 各クレートは git rev `1d3c3de` に固定（trouble 公式 rp-pico-w 例と同一）。
+- `cyw43` 0.7.0 / `cyw43-pio` 0.10.0（`bluetooth` フィーチャ）。
+- `trouble-host`（git, Cargo.lock で rev 固定）。
+
+## 4. DS18B20 プロトコル
+
+### 4.1 測定シーケンス
+
+1. リセット → プレゼンス検出
+2. Skip ROM（0xCC）
+3. Convert T（0x44）
+4. 変換待ち（12bit で最大 750ms、非同期待機）
+5. リセット → Skip ROM（0xCC）
+6. Read Scratchpad（0xBE）
+7. 9 バイト読み出し
+8. CRC8 検証 → 温度変換
+
+### 4.2 スクラッチパッド構造（9 バイト）
+
+| Byte | 内容 |
+| --- | --- |
+| 0 | 温度 LSB |
+| 1 | 温度 MSB |
+| 2-3 | TH / TL |
+| 4 | Configuration（分解能: bit6:5） |
+| 5-7 | 予約 |
+| 8 | CRC8 |
+
+### 4.3 温度変換
+
+- 生値 `raw`（16bit 符号付き）は **1/16 ℃** 単位。`温度[℃] = raw / 16`。
+- BLE ESS Temperature（0x2A6E）は `sint16`・**0.01℃（センチ℃）** 単位・リトルエンディアン。
+  - `centi = round(raw × 100 / 16)`。
+- 1-Wire バス開放時は全 0xFF（`Disconnected`）、無応答時は全 0x00（`NoResponse`）として扱う。
+
+## 5. BLE 仕様
+
+### 5.1 デバイス
+
+- デバイス名: `PicoTemp`
+- アドレス: ランダム静的アドレス（テスト用固定値）
+- Appearance: Generic Sensor
+
+### 5.2 アドバタイズ（非接続で温度取得）
+
+`ConnectableScannableUndirected` で以下の AD 構造を広告する。
+
+| AD Type | 内容 |
+| --- | --- |
+| Flags(0x01) | LE General Discoverable, BR/EDR Not Supported |
+| Service Data - 16bit UUID(0x16) | UUID=0x181A + 温度2バイト（sint16, センチ℃, LE） |
+| Complete Local Name(0x09) | `PicoTemp` |
+
+- 未接続時は `ADV_REFRESH_SECS`（既定 10 秒）ごとにアドバタイズを更新（最新温度を反映）。
+
+### 5.3 GATT（接続で温度取得）
+
+| Service | Characteristic | UUID | プロパティ | 値 |
+| --- | --- | --- | --- | --- |
+| Environmental Sensing (0x181A) | Temperature | 0x2A6E | Read / Notify | sint16, センチ℃, LE |
+
+- 接続中は `NOTIFY_PERIOD_SECS`（既定 2 秒）ごとに最新温度を Notify。
+- Read 時は最新の測定値を返す。
+
+## 6. 動作パラメータ（既定値）
+
+| パラメータ | 既定 | 定義箇所 |
+| --- | --- | --- |
+| センサ測定周期 | 2 秒 | `main.rs: SENSOR_PERIOD_SECS` |
+| アドバタイズ更新周期 | 10 秒 | `ble.rs: ADV_REFRESH_SECS` |
+| Notify 周期 | 2 秒 | `ble.rs: NOTIFY_PERIOD_SECS` |
+| 変換待ち | 750ms | `onewire.rs: CONVERSION_TIME_MS` |
+
+## 7. エラー処理
+
+- センサ読み取り失敗時は共有温度を「未測定」（番兵値）にし、アドバタイズには温度 0 を載せる。
+- BLE ランナー / Notify のエラーはログ出力し、致命的でない限り継続する。
+- CRC 不一致は 1 サイクルを破棄し、次周期で再測定する。
+
+## 8. 今後の拡張候補
+
+- 電池駆動向けの低消費電力化（アドバタイズ間隔延長、スリープ）。
+- 複数センサ対応（ROM 検索）。
+- 湿度など他の環境センシング特性の追加。
