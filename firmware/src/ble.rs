@@ -152,7 +152,17 @@ async fn advertise<'values, 'server, C: Controller>(
     match select(advertiser.accept(), Timer::after_secs(ADV_REFRESH_SECS)).await {
         Either::First(Ok(conn)) => {
             info!("[adv] connection established");
-            conn.with_attribute_server(server).ok()
+            match conn.with_attribute_server(server) {
+                Ok(gatt_conn) => Some(gatt_conn),
+                Err(e) => {
+                    // GATT サーバ確立失敗。原因追跡のためログを残す。
+                    warn!(
+                        "[adv] attribute server error: {:?}",
+                        defmt::Debug2Format(&e)
+                    );
+                    None
+                }
+            }
         }
         Either::First(Err(e)) => {
             let e = defmt::Debug2Format(&e);
@@ -193,13 +203,14 @@ async fn notify_task<P: PacketPool>(
     let temperature = server.ess.temperature;
     loop {
         let centi = TEMP_CENTI.load(Ordering::Relaxed);
-        if centi != NO_READING {
-            // Read 用に値を更新(未購読でも最新値を返せるように)。
-            let _ = server.set(&temperature, &centi);
-            // 購読中の Central へ通知(store=true でテーブルにも反映)。
-            if let Err(e) = temperature.notify(conn, &centi, true).await {
-                warn!("[notify] error: {:?}", e);
-            }
+        // 未測定時は 0 を格納し、Read が常に最新状態(古い値を返し続けない)になるようにする。
+        // アドバタイズの Service Data と同じ扱い。
+        let value = if centi == NO_READING { 0 } else { centi };
+        // Read 用に値を更新(未購読でも最新値を返せるように)。
+        let _ = server.set(&temperature, &value);
+        // 購読中の Central へ通知(store=true でテーブルにも反映)。
+        if let Err(e) = temperature.notify(conn, &value, true).await {
+            warn!("[notify] error: {:?}", e);
         }
         Timer::after_secs(NOTIFY_PERIOD_SECS).await;
     }
