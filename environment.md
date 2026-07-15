@@ -74,9 +74,20 @@ rustup component add rustfmt clippy
 
 Pico W の無線を動かすには Infineon 提供の blob が必要（リポジトリには非同梱）。
 
+**macOS / Linux（bash）**:
+
 ```bash
 # リポジトリルートで実行
 bash scripts/fetch-cyw43-firmware.sh
+```
+
+**Windows（PowerShell）**:
+
+```powershell
+# リポジトリのどこからでも可（PowerShell 5.1 / 7 いずれも）
+pwsh -File scripts/fetch-cyw43-firmware.ps1
+# もしくは
+powershell -ExecutionPolicy Bypass -File scripts\fetch-cyw43-firmware.ps1
 ```
 
 `firmware/cyw43-firmware/` に以下が配置される:
