@@ -42,6 +42,9 @@ Set-Location .\water_temperature
 | DQ | GPIO15（物理20）＋ 4.7kΩ で 3V3 へ |
 | GND | GND（物理38 など） |
 
+> ピンの物理位置がわかる **Pico W ピン配置図** は `specification.md` の
+> 「2.2 配線 → Pico W ピン配置図」を参照してください。
+
 ## 2. ツールチェーンのセットアップ
 
 ### 2.1 Rust
