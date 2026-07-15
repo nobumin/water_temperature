@@ -13,7 +13,13 @@ Pico W の無線チップ CYW43439 を動かすには、以下の Infineon 提�
 リポジトリルートで次を実行してください:
 
 ```bash
+# macOS / Linux
 scripts/fetch-cyw43-firmware.sh
+```
+
+```powershell
+# Windows (PowerShell)
+pwsh -File scripts/fetch-cyw43-firmware.ps1
 ```
 
 または [embassy の cyw43-firmware](https://github.com/embassy-rs/embassy/tree/main/cyw43-firmware)
