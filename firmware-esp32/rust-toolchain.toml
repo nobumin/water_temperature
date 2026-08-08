@@ -1,0 +1,4 @@
+# ESP32 (Xtensa LX6) は stable Rust では扱えないため、Espressif の Rust フォークを使う。
+# 導入: `cargo install espup && espup install`（詳細は environment.md）。
+[toolchain]
+channel = "esp"

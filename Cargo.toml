@@ -1,16 +1,19 @@
 # Cargo ワークスペース定義
 #
-# - core:     ハードウェア非依存の中核ロジック (no_std)。ホスト上で `cargo test` 可能。
-# - firmware: Raspberry Pi Pico W 向けの組込みバイナリ (thumbv6m-none-eabi)。
+# - core:            ハードウェア非依存の中核ロジック (no_std)。ホスト上で `cargo test` 可能。
+# - firmware:        Raspberry Pi Pico W 向けの組込みバイナリ (thumbv6m-none-eabi)。
+# - firmware-esp32:  ESP-WROOM-32D 向けの組込みバイナリ (xtensa-esp32-none-elf)。
 #
-# firmware は組込みターゲット専用の依存 (embassy 等) を含むため、
+# firmware 系は組込みターゲット専用の依存 (embassy / esp-hal 等) を含むため、
 # ホストでの `cargo test`/`clippy` はワークスペース既定メンバから外し、
 # core のみをホストで検証する。firmware は明示的にターゲット指定でビルドする。
 [workspace]
 resolver = "2"
 members = ["core"]
-# firmware は組込み専用ターゲットのため、既定メンバから除外し個別にビルドする。
-exclude = ["firmware"]
+# 組込み専用ターゲットのため、既定メンバから除外し個別にビルドする。
+# firmware-esp32 は target もツールチェーン(Espressif フォーク)も異なるので、
+# 独立したワークスペースとして own Cargo.lock を持たせる。
+exclude = ["firmware", "firmware-esp32"]
 
 [workspace.package]
 edition = "2021"

@@ -66,3 +66,37 @@ jobs:
 
       - name: Build (firmware, skip-cyw43-firmware)
         run: cargo build --release --features skip-cyw43-firmware
+
+  # ---- ESP-WROOM-32D 版のクロスコンパイル確認(xtensa-esp32-none-elf)。 ----
+  # ---- Xtensa は stable Rust 非対応のため Espressif フォークを導入する。 ----
+  # ---- BT はチップ内蔵なので、Pico W 版と違い blob 無しでそのままビルドできる。 ----
+  firmware-esp32:
+    name: firmware-esp32 (xtensa-esp32 build)
+    runs-on: ubuntu-latest
+    # 全体の RUSTFLAGS(-D warnings) は .cargo/config.toml の rustflags を打ち消すため、
+    # このジョブでは上書きする。build-std で core/alloc も同じフラグでビルドされる点にも注意。
+    env:
+      RUSTFLAGS: "-C force-frame-pointers"
+    defaults:
+      run:
+        working-directory: firmware-esp32
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Espressif Rust toolchain (Xtensa)
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32
+          ldproxy: false
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware-esp32
+
+      - name: Format check (firmware-esp32)
+        run: cargo fmt --check
+
+      - name: Build (firmware-esp32)
+        run: cargo build --release

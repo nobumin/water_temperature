@@ -71,7 +71,12 @@ PR のレビューは **GitHub Copilot** が実施する。
 ## 6. テスト・CI
 
 - ハードウェア非依存ロジックは `core` クレートに置き、**ホストで `cargo test`** 可能にする。
-- CI（`.github/workflows/ci.yml`）で fmt / clippy / `core` テスト / firmware クロスビルドを検証する。
+  `core` は Pico W 版・ESP32 版の**両ファームで共有**するため、依存を増やさない。
+- CI（`.github/workflows/ci.yml`）で fmt / clippy / `core` テスト / 各 firmware の
+  クロスビルド（`thumbv6m-none-eabi` と `xtensa-esp32-none-elf`）を検証する。
+- `firmware/`（Pico W）と `firmware-esp32/`（ESP-WROOM-32D）は target もツールチェーンも
+  異なるため、ルートワークスペースから `exclude` した**独立ワークスペース**とする。
+  cargo コマンドは必ず各ディレクトリ内で実行する。
 - 実機を要する検証は `test_procedure.md` に手順化し、手動または将来のセルフホスト Runner で実施する。
 
 ## 7. ローカル作業ディレクトリの制約

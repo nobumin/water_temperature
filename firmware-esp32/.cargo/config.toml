@@ -1,0 +1,17 @@
+[build]
+target = "xtensa-esp32-none-elf"
+rustflags = [
+  # esp-backtrace でバックトレースを得るために必要。
+  "-C", "force-frame-pointers",
+]
+
+[target.xtensa-esp32-none-elf]
+# `cargo run --release` で実機へ書き込み、シリアルモニタを開く。
+runner = "espflash flash --monitor"
+
+[env]
+ESP_LOG = "info"
+
+# Xtensa は LLVM 本家未対応のため、Espressif フォークで core/alloc を自前ビルドする。
+[unstable]
+build-std = ["alloc", "core"]

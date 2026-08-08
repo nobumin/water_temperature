@@ -6,7 +6,7 @@
 | 層 | 対象 | 実行方法 | 自動化 |
 | --- | --- | --- | --- |
 | L1 ホスト単体テスト | 温度変換・CRC・ESS エンコード（`core`） | `cargo test` | CI で自動 |
-| L2 クロスビルド | firmware が `thumbv6m` で通ること | `cargo build`（skip-cyw43-firmware） | CI で自動 |
+| L2 クロスビルド | firmware が `thumbv6m` / `xtensa-esp32` で通ること | `cargo build` | CI で自動 |
 | L3 実機 HIL | センサ読み取り・BLE 提供 | 実機書き込み + スマホ確認 | 手動（将来セルフホスト化） |
 
 ---
@@ -37,6 +37,8 @@ cargo test -p pico-temp-core
 
 ## L2. クロスビルド確認（実機不要）
 
+**Pico W（`thumbv6m-none-eabi`）**
+
 ```bash
 cd firmware
 cargo fmt --check
@@ -44,9 +46,19 @@ cargo clippy --features skip-cyw43-firmware -- -D warnings
 cargo build --release --features skip-cyw43-firmware
 ```
 
+**ESP-WROOM-32D（`xtensa-esp32-none-elf`）**
+
+esp ツールチェーン導入済み・環境変数読み込み済みであること（`environment.md` 2.2）。
+
+```bash
+cd firmware-esp32
+cargo fmt --check
+cargo build --release
+```
+
 ### 期待結果
 
-fmt / clippy 警告なし、`thumbv6m-none-eabi` 向けビルド成功。
+fmt / clippy 警告なし、各ターゲット向けビルド成功。
 
 ---
 
@@ -56,6 +68,8 @@ fmt / clippy 警告なし、`thumbv6m-none-eabi` 向けビルド成功。
 
 - `core` ジョブ: `cargo fmt --check` / `clippy(core)` / `cargo test(core)`
 - `firmware` ジョブ: `cargo fmt --check` / `clippy(firmware)` / `cargo build(firmware)`
+- `firmware-esp32` ジョブ: Espressif ツールチェーン導入 → `cargo fmt --check` / `cargo build`
+  （`xtensa-esp32-none-elf`）
 
 PR が緑になることを Copilot レビュー前の前提とする。
 
@@ -63,11 +77,18 @@ PR が緑になることを Copilot レビュー前の前提とする。
 
 ## L3. 実機 HIL テスト（手動）
 
-前提: `environment.md` に従い書き込み済み。可能なら probe-rs でログを見ながら実施。
+前提: `environment.md` に従い書き込み済み。ログを見ながら実施する。
+
+- **Pico W**: probe-rs 使用時は `cd firmware && cargo run --release`（defmt ログ）
+- **ESP-WROOM-32D**: `cd firmware-esp32 && cargo run --release`
+  （`espflash flash --monitor` により書き込み後そのままログ表示）
+
+**ボード差分の要点**: BLE の見え方（デバイス名 `PicoTemp`、Service Data、GATT）は両ボードで
+同一。異なるのは **DS18B20 のデータ線（Pico W = GPIO15 / ESP32 = GPIO4）** とログ出力方法のみ。
 
 ### L3-1. 起動・センサ読み取り
 
-1. Pico W を給電。probe-rs 使用時は `cargo run --release` でログ表示。
+1. ボードを給電（上記コマンドでログ表示）。
 2. `DS18B20: <n> centi-degC` のログが約 2 秒周期で出ることを確認。
 3. **確認**: 室温付近（例 2000〜3000 = 20〜30℃）の妥当な値か。
 4. センサを指でつまむ等で温めると値が上昇することを確認。

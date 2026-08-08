@@ -1,0 +1,65 @@
+[package]
+name = "esp32-temperature-firmware"
+version = "0.1.0"
+description = "ESP-WROOM-32D (ESP32) 向け DS18B20 温度 BLE ファームウェア"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/nobumin/water_temperature"
+resolver = "2"
+
+# ルートワークスペース(core/firmware)とは target もツールチェーンも異なるため、
+# 独立したワークスペースとして扱う(Cargo.lock も本ディレクトリ配下に持つ)。
+[workspace]
+
+[dependencies]
+# 中核ロジック(温度変換・CRC・ESS エンコード)。Pico W 版と共有。
+# 依存ゼロの no_std クレートなので、ワークスペースが別でも競合しない。
+# defmt は使わない(ESP32 側のログは log クレート)ため feature は有効化しない。
+pico-temp-core = { path = "../core" }
+
+# ESP32 (Xtensa LX6) HAL とランタイム
+esp-hal = { version = "1.1.0", features = ["esp32", "unstable"] }
+esp-rtos = { version = "0.3.0", features = ["esp32", "embassy", "esp-alloc", "esp-radio", "log-04"] }
+esp-radio = { version = "0.18.0", features = ["esp32", "ble", "log-04", "unstable"] }
+esp-alloc = "0.10.0"
+esp-backtrace = { version = "0.19.0", features = ["esp32", "panic-handler", "println"] }
+esp-println = { version = "0.17.0", features = ["esp32", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
+
+# embassy (esp-rtos がタイムドライバとエグゼキュータを提供する)
+embassy-executor = "0.10.0"
+embassy-time = "0.5.1"
+embassy-futures = "0.1.2"
+
+# BLE ホストスタック。esp-radio の BleConnector を bt-hci コントローラとして使う。
+# rev は Pico W 版(firmware/Cargo.lock)と同じものに固定し、両ファームで
+# 同一の trouble-host API(= 同じ ble.rs ロジック)を使えるようにする。
+trouble-host = { git = "https://github.com/embassy-rs/trouble.git", rev = "07bf6c0", features = ["peripheral", "gatt", "derive", "default-packet-pool", "default-packet-pool-mtu-255"] }
+
+# #[gatt_server] マクロの展開が static_cell を参照する。
+static_cell = "2"
+
+# 1-Wire のタイムスロット保護とロギング
+critical-section = "1.1"
+log = "0.4"
+
+# crates.io 版の esp-radio 0.18 は bt-hci 0.8 を使うが、trouble-host は bt-hci 0.9 を要求するため
+# そのままでは Controller トレイトが実装されない。trouble 公式 esp32 例と同じく、
+# esp-* を embassy-rs/esp-hal の同一リビジョンへ差し替えて bt-hci のバージョンを揃える。
+[patch.crates-io]
+esp-alloc = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-backtrace = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-bootloader-esp-idf = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-hal = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-println = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-radio = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+esp-rtos = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+debug = 2
+
+[profile.dev]
+opt-level = "s"
