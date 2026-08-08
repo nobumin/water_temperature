@@ -73,10 +73,13 @@ jobs:
   firmware-esp32:
     name: firmware-esp32 (xtensa-esp32 build)
     runs-on: ubuntu-latest
-    # 全体の RUSTFLAGS(-D warnings) は .cargo/config.toml の rustflags を打ち消すため、
-    # このジョブでは上書きする。build-std で core/alloc も同じフラグでビルドされる点にも注意。
+    # env RUSTFLAGS は .cargo/config.toml の rustflags を「置き換える」ため、
+    # firmware-esp32/.cargo/config.toml と同じ内容をここにも書く必要がある
+    # (-Tlinkall.x が無いと割り込みベクタのシンボルが undefined reference になる)。
+    # どちらかを変更したら必ず両方を合わせること。
+    # build-std で core/alloc も同じフラグでビルドされる点にも注意。
     env:
-      RUSTFLAGS: "-C force-frame-pointers"
+      RUSTFLAGS: "-C force-frame-pointers -C link-arg=-Tlinkall.x"
     defaults:
       run:
         working-directory: firmware-esp32
