@@ -50,7 +50,9 @@ cargo test -p pico-temp-core
 cd firmware && cargo build --release --features skip-cyw43-firmware   # blob 無しでコンパイル確認
 ```
 
-**ESP-WROOM-32D**（事前に `cargo install espup && espup install --targets esp32`）
+**ESP-WROOM-32D**（事前に `cargo install espup && espup install --targets esp32`。
+インストール後、シェルごとに `export-esp.sh`（Windows は `export-esp.ps1`）の読み込みが必要。
+詳細は `environment.md` 2.2 参照）
 
 ```bash
 cd firmware-esp32 && cargo build --release

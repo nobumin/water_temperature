@@ -101,5 +101,11 @@ jobs:
       - name: Format check (firmware-esp32)
         run: cargo fmt --check
 
+      # 警告のエラー化は clippy へ明示的に渡す。RUSTFLAGS に -D warnings を足すと
+      # build-std(core/alloc)や git 由来の esp-* クレートまで対象になり、
+      # 上流の警告 1 つで CI が落ちるため、ここでは自クレートのみを厳格化する。
+      - name: Clippy (firmware-esp32)
+        run: cargo clippy --release -- -D warnings
+
       - name: Build (firmware-esp32)
         run: cargo build --release

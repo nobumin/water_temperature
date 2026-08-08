@@ -53,6 +53,7 @@ esp ツールチェーン導入済み・環境変数読み込み済みである�
 ```bash
 cd firmware-esp32
 cargo fmt --check
+cargo clippy --release -- -D warnings
 cargo build --release
 ```
 
@@ -66,10 +67,13 @@ fmt / clippy 警告なし、各ターゲット向けビルド成功。
 
 `.github/workflows/ci.yml` が push / PR で以下を実行する。
 
-- `core` ジョブ: `cargo fmt --check` / `clippy(core)` / `cargo test(core)`
-- `firmware` ジョブ: `cargo fmt --check` / `clippy(firmware)` / `cargo build(firmware)`
-- `firmware-esp32` ジョブ: Espressif ツールチェーン導入 → `cargo fmt --check` / `cargo build`
-  （`xtensa-esp32-none-elf`）
+- `core` ジョブ: `cargo fmt --all --check` / `cargo clippy -p pico-temp-core --all-targets -- -D warnings`
+  / `cargo test -p pico-temp-core`
+- `firmware` ジョブ: `cargo fmt --check` /
+  `cargo clippy --features skip-cyw43-firmware -- -D warnings` /
+  `cargo build --release --features skip-cyw43-firmware`（`thumbv6m-none-eabi`）
+- `firmware-esp32` ジョブ: Espressif ツールチェーン導入 → `cargo fmt --check` /
+  `cargo clippy --release -- -D warnings` / `cargo build --release`（`xtensa-esp32-none-elf`）
 
 PR が緑になることを Copilot レビュー前の前提とする。
 
