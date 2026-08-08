@@ -66,3 +66,46 @@ jobs:
 
       - name: Build (firmware, skip-cyw43-firmware)
         run: cargo build --release --features skip-cyw43-firmware
+
+  # ---- ESP-WROOM-32D 版のクロスコンパイル確認(xtensa-esp32-none-elf)。 ----
+  # ---- Xtensa は stable Rust 非対応のため Espressif フォークを導入する。 ----
+  # ---- BT はチップ内蔵なので、Pico W 版と違い blob 無しでそのままビルドできる。 ----
+  firmware-esp32:
+    name: firmware-esp32 (xtensa-esp32 build)
+    runs-on: ubuntu-latest
+    # env RUSTFLAGS は .cargo/config.toml の rustflags を「置き換える」ため、
+    # firmware-esp32/.cargo/config.toml と同じ内容をここにも書く必要がある
+    # (-Tlinkall.x が無いと割り込みベクタのシンボルが undefined reference になる)。
+    # どちらかを変更したら必ず両方を合わせること。
+    # build-std で core/alloc も同じフラグでビルドされる点にも注意。
+    env:
+      RUSTFLAGS: "-C force-frame-pointers -C link-arg=-Tlinkall.x"
+    defaults:
+      run:
+        working-directory: firmware-esp32
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Espressif Rust toolchain (Xtensa)
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32
+          ldproxy: false
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware-esp32
+
+      - name: Format check (firmware-esp32)
+        run: cargo fmt --check
+
+      # 警告のエラー化は clippy へ明示的に渡す。RUSTFLAGS に -D warnings を足すと
+      # build-std(core/alloc)や git 由来の esp-* クレートまで対象になり、
+      # 上流の警告 1 つで CI が落ちるため、ここでは自クレートのみを厳格化する。
+      - name: Clippy (firmware-esp32)
+        run: cargo clippy --release -- -D warnings
+
+      - name: Build (firmware-esp32)
+        run: cargo build --release
