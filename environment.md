@@ -266,4 +266,6 @@ defmt ログ（`info!` など）がホスト側に表示される。
 | シリアルポートが開けない（Linux） | ユーザーを `dialout` グループへ追加、または `sudo` で実行。 |
 | ログが文字化けする | モニタのボーレートを 115200 に設定。 |
 | 温度の読み取りが不安定 | 1-Wire はソフトタイミング。配線を短く、プルアップを確実に。GPIO15/0/2/12（ストラッピング）を使っていないか確認。 |
+| `DS18B20 ROM read error` が出る／ファミリコードが 0x28 でない | 起動時セルフテストの失敗。1-Wire 通信が成立していない。配線・プルアップ・GPIO 番号を確認する。バス上にセンサが 2 個以上あると Read ROM は必ず失敗する（その場合はセルフテストの失敗を無視してよい）。 |
+| `CrcMismatch` が続く | 直前の `[1-Wire] scratchpad raw = [..]` の生バイト列で切り分ける。<br>・**1 に偏る（0xFF が多い）** → 読み取りサンプル点が遅い。`onewire.rs` の `read_bit` の待機値を短くする。<br>・**毎回ランダムに散る** → タイミング擾乱。ビットバンギングを free 関数化して `#[esp_hal::ram]` で IRAM 配置を検討。<br>・**全 0x00** → 給電またはプルアップの物理的な問題。 |
 | 温度が 0.00 で固定され、`DS18B20` のログが**1 行も出ない**（BLE は正常に広告・接続できる） | embassy のタイマが動いていない。`Cargo.lock` で embassy クレートが crates.io 版と git 版に**分裂**していないか確認する。<br>`grep -c 'name = "embassy-executor-timer-queue"' firmware-esp32/Cargo.lock` が **1** でなければ該当。<br>対処: `firmware-esp32/Cargo.toml` の `[patch.crates-io]` で embassy ファミリ（`embassy-time` / `embassy-time-driver` / `embassy-time-queue-utils` / `embassy-executor-timer-queue` 等）を**すべて同一 rev**へ固定し、lock を再生成する。<br>詳細は `specification.md` の「ESP32 版の依存方針」を参照。 |

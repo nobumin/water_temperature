@@ -11,26 +11,51 @@
 //!
 //! 外部に **4.7kΩ プルアップ抵抗(データ線⇔3.3V)** が必要(DS18B20 の仕様)。
 //!
-//! Pico W 版(`firmware/src/onewire.rs`)とプロトコル手順・タイミングは同一。
+//! プロトコル手順は Pico W 版(`firmware/src/onewire.rs`)と同一だが、
+//! **µs 待機の実装だけはボード固有**（本モジュールの `delay_us` のコメント参照）。
 
 use embassy_time::Timer;
-use esp_hal::delay::Delay;
 use esp_hal::gpio::{DriveMode, Flex, InputConfig, OutputConfig, Pull};
-use pico_temp_core::ds18b20::{Ds18b20Error, Scratchpad, Temperature};
+use esp_hal::rom::ets_delay_us;
+use log::warn;
+use pico_temp_core::ds18b20::{crc8, Ds18b20Error, Scratchpad, Temperature};
 
 /// DS18B20 の ROM コマンド。単一センサ前提のため Skip ROM を用いる。
 const CMD_SKIP_ROM: u8 = 0xCC;
+/// ROM コード(64bit)読み出し。バス上にセンサが 1 個のときのみ使える。
+const CMD_READ_ROM: u8 = 0x33;
 /// 温度変換開始。
 const CMD_CONVERT_T: u8 = 0x44;
 /// スクラッチパッド読み出し。
 const CMD_READ_SCRATCHPAD: u8 = 0xBE;
 /// 12bit 分解能の最大変換時間(ms)。余裕を見て待機する。
 const CONVERSION_TIME_MS: u64 = 750;
+/// DS18B20 のファミリコード。Read ROM の 1 バイト目がこの値になる。
+pub const FAMILY_CODE: u8 = 0x28;
+
+/// マイクロ秒のブロッキング待機(タイムスロット生成用)。
+///
+/// **`esp_hal::delay::Delay` を使ってはならない。** ESP32 の `Delay` は内部で
+/// `Instant::now()` をループで呼ぶが、ESP32 の `Instant::now()` は TIMG0 の LACT
+/// タイマを読む実装で、「更新完了ビットが無いため下位 32bit が変化するまで
+/// ポーリングする」という重い手順を踏む。このため 1 回の呼び出しに µs オーダーの
+/// オーバーヘッドが乗り、`delay_us(6)` が実際には十数 µs かかってしまう。
+///
+/// 1-Wire の読み取りは**立ち下がりから 15µs 以内**にサンプルする必要があるため、
+/// このオーバーヘッドがあるとサンプル点が規定を超え、センサが出した 0 を 1 として
+/// 読んでしまう(実機で `CrcMismatch` / 全 0xFF の `Disconnected` として観測された)。
+///
+/// ROM の `ets_delay_us` は CCOUNT ベースの busy-loop でバスアクセスを伴わない。
+/// CPU 周波数変更時に esp-hal が `ets_update_cpu_frequency_rom()` を呼ぶため、
+/// `CpuClock::max()` を設定した後でも精度が保たれる。
+#[inline(always)]
+fn delay_us(us: u32) {
+    ets_delay_us(us);
+}
 
 /// 単一の DS18B20 を 1-Wire で読むドライバ。
 pub struct Ds18b20<'d> {
     pin: Flex<'d>,
-    delay: Delay,
 }
 
 impl<'d> Ds18b20<'d> {
@@ -44,10 +69,7 @@ impl<'d> Ds18b20<'d> {
         pin.set_output_enable(true);
         // 初期状態はバス解放(High = ハイインピーダンス)。
         pin.set_high();
-        Self {
-            pin,
-            delay: Delay::new(),
-        }
+        Self { pin }
     }
 
     /// バスを Low に駆動する。
@@ -65,20 +87,15 @@ impl<'d> Ds18b20<'d> {
         self.pin.is_high()
     }
 
-    /// マイクロ秒のブロッキング待機(タイムスロット生成用)。
-    fn delay_us(&self, us: u32) {
-        self.delay.delay_micros(us);
-    }
-
     /// リセットパルスを送り、プレゼンスパルス(センサ応答)の有無を返す。
     fn reset(&mut self) -> bool {
         critical_section::with(|_| {
             self.drive_low();
-            self.delay_us(480);
+            delay_us(480);
             self.release();
-            self.delay_us(70);
+            delay_us(70);
             let present = !self.sample(); // センサ在席時はバスが Low に引かれる
-            self.delay_us(410);
+            delay_us(410);
             present
         })
     }
@@ -88,26 +105,32 @@ impl<'d> Ds18b20<'d> {
         critical_section::with(|_| {
             self.drive_low();
             if bit {
-                self.delay_us(6);
+                delay_us(6);
                 self.release();
-                self.delay_us(64);
+                delay_us(64);
             } else {
-                self.delay_us(60);
+                delay_us(60);
                 self.release();
-                self.delay_us(10);
+                delay_us(10);
             }
         });
     }
 
     /// 1 ビット受信。
+    ///
+    /// サンプル点は `3 + 8` = **立ち下がりから約 11µs**。DS18B20 の規定は「15µs 以内」だが、
+    /// 規定値ちょうどの `6 + 9` = 15µs にすると余裕がゼロになり、わずかなオーバーヘッドで
+    /// センサの 0 を取りこぼす。センサは立ち下がりから 1µs 以内に 0 を駆動し、1 の場合も
+    /// 外部プルアップによる立ち上がりは数 µs で完了するため、11µs は「遅すぎず早すぎない」
+    /// 安全域になる。スロット全体は 60µs 以上を維持する。
     fn read_bit(&mut self) -> bool {
         critical_section::with(|_| {
             self.drive_low();
-            self.delay_us(6);
+            delay_us(3);
             self.release();
-            self.delay_us(9);
+            delay_us(8);
             let bit = self.sample();
-            self.delay_us(55);
+            delay_us(50);
             bit
         })
     }
@@ -143,6 +166,40 @@ impl<'d> Ds18b20<'d> {
         }
     }
 
+    /// ROM コード(64bit)を読み出す。**バス上にセンサが 1 個のときのみ**有効。
+    ///
+    /// 起動時のセルフテスト用。1 バイト目が [`FAMILY_CODE`] (0x28) で CRC が合えば、
+    /// 配線と 1-Wire のタイミングが正常であることを確定できる。温度変換を伴わないため、
+    /// 「通信の問題」と「変換シーケンスの問題」を切り分けられる。
+    pub fn read_rom(&mut self) -> Result<[u8; 8], Ds18b20Error> {
+        if !self.reset() {
+            return Err(self.absence_error());
+        }
+        self.write_byte(CMD_READ_ROM);
+
+        let mut rom = [0u8; 8];
+        for b in rom.iter_mut() {
+            *b = self.read_byte();
+        }
+
+        if rom.iter().all(|&b| b == 0xFF) {
+            return Err(Ds18b20Error::Disconnected);
+        }
+        if rom.iter().all(|&b| b == 0x00) {
+            return Err(Ds18b20Error::NoResponse);
+        }
+        // ROM は 先頭 7 バイト(family + シリアル)に対する CRC が末尾に入る。
+        let computed = crc8(&rom[0..7]);
+        if computed != rom[7] {
+            warn!("[1-Wire] ROM raw = {:02X?}", rom);
+            return Err(Ds18b20Error::CrcMismatch {
+                expected: rom[7],
+                computed,
+            });
+        }
+        Ok(rom)
+    }
+
     /// 温度を 1 回測定して返す。
     ///
     /// 手順: リセット → Skip ROM → Convert T → 変換待ち → リセット →
@@ -168,6 +225,12 @@ impl<'d> Ds18b20<'d> {
             *b = self.read_byte();
         }
 
-        Scratchpad::new(bytes).temperature()
+        let result = Scratchpad::new(bytes).temperature();
+        if result.is_err() {
+            // エラー種別だけでは原因を絞れないため、生バイト列も残す。
+            // 1 に偏る→サンプルが遅い / ランダム→タイミング擾乱 / 全 0x00→給電・プルアップ。
+            warn!("[1-Wire] scratchpad raw = {:02X?}", bytes);
+        }
+        result
     }
 }
