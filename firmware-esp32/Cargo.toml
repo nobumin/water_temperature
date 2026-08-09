@@ -54,7 +54,22 @@ esp-hal = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
 esp-println = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
 esp-radio = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
 esp-rtos = { git = "https://github.com/embassy-rs/esp-hal.git", rev = "b7eec0f" }
+
+# embassy ファミリは「すべて」同一 rev へ揃える。1 つでも crates.io 版が混ざると
+# `embassy-executor-timer-queue` が git 版と crates.io 版の 2 つに分裂する。
+# このクレートは integrated timer queue の状態を**タスクヘッダ内**に持つため、
+# 分裂すると esp-rtos のタイムドライバ(crates.io 側キューへ schedule_wake)と
+# エグゼキュータ(git 側タスクヘッダ)が別々の状態を見ることになり、
+# **`Timer::after(..).await` が永久に復帰しない**(ビルドとリンクは通ってしまう)。
+# 実害: sensor_task が変換待ちで停止し温度が更新されない / notify_task が 1 回で停止。
+# 重複の再発は CI の lock チェック(ci.yml の firmware-esp32 ジョブ)で検知する。
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-executor-timer-queue = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "1d3c3de" }
 
 # プロファイルは trouble 公式 esp32 例と同一にする。
 # ESP32 では PHY/BT のプリビルド blob(libphy/librtc/libbtdm_app)が IRAM から

@@ -238,6 +238,29 @@ Cargo ワークスペース（`firmware` / `firmware-esp32` は target・ツー�
   そのままでは `Controller` トレイトが実装されない。この差し替えで `bt-hci` を 0.9 に揃える
   （trouble 公式 esp32 例と同じ対処）。
 
+#### ESP32 版の依存方針: embassy ファミリは単一 rev に揃える（必須）
+
+`[patch.crates-io]` では **embassy 系クレートを 1 つ残らず同一 rev（`1d3c3de`）へ固定する**。
+`embassy-executor` だけを git 化して `embassy-time` 系を crates.io のまま残す、といった
+混在をしてはならない。
+
+理由は `embassy-executor-timer-queue` が **2 つに分裂**するため。
+
+- `embassy-executor`（git）→ git 版 `embassy-executor-timer-queue`
+- `embassy-time-queue-utils`（crates.io、`esp-rtos` のタイムドライバが使用）
+  → crates.io 版 `embassy-executor-timer-queue`
+
+このクレートは integrated timer queue の状態を**タスクヘッダ内**に保持する。分裂すると
+タイムドライバが `schedule_wake()` する先と、エグゼキュータが実際にタスクを管理する先が
+**別々の状態**になり、**`Timer::after(..).await` が永久に復帰しない**。
+
+厄介なのは、シンボル衝突が起きないため**ビルドもリンクも成功してしまう**点。症状は実機でのみ
+現れ、「BLE の広告・接続は正常だが、温度が 0.00 のまま更新されず、`DS18B20` のログが 1 行も
+出ない」という形になる（センサ読み取りは変換待ちの `Timer` で停止する）。
+
+再発防止として、CI（`.github/workflows/ci.yml` の `firmware-esp32` ジョブ）で
+`Cargo.lock` を検査し、対象クレートが 1 エントリかつ git 由来であることを検証している。
+
 > ESP32 は Wi-Fi/BT スタックが割り込みを多用するため、1-Wire のタイムスロットを
 > `critical_section` で保護することが Pico W 以上に重要。それでも読み取りが不安定な場合は、
 > RMT ペリフェラルによるハードウェア生成へ置き換える余地がある（「今後の拡張候補」参照）。
