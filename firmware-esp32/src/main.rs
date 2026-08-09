@@ -36,6 +36,10 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// DS18B20 の測定周期(秒)。
 const SENSOR_PERIOD_SECS: u64 = 2;
 
+/// 起動後、最初の測定までの待機時間(ms)。
+/// 電源投入直後はセンサが応答せず 1 回目が必ず失敗するため、安定を待ってから始める。
+const SENSOR_SETTLE_MS: u64 = 100;
+
 /// esp-radio(BLE)が必要とするヒープサイズ。
 const HEAP_SIZE: usize = 72 * 1024;
 
@@ -43,6 +47,23 @@ const HEAP_SIZE: usize = 72 * 1024;
 #[embassy_executor::task]
 async fn sensor_task(pin: Flex<'static>) {
     let mut sensor = Ds18b20::new(pin);
+    embassy_time::Timer::after_millis(SENSOR_SETTLE_MS).await;
+
+    // 起動時セルフテスト。Read ROM が通れば「配線と 1-Wire タイミングは正常」と確定でき、
+    // 以降 CRC エラーが続く場合に変換シーケンス側の問題だと切り分けられる。
+    match sensor.read_rom() {
+        Ok(rom) if rom[0] == onewire::FAMILY_CODE => {
+            info!("DS18B20 ROM = {:02X?} (family code OK)", rom);
+        }
+        Ok(rom) => {
+            warn!(
+                "DS18B20 ROM = {:02X?} (family code {:#04X}: DS18B20 は 0x28)",
+                rom, rom[0]
+            );
+        }
+        Err(e) => warn!("DS18B20 ROM read error: {:?}", e),
+    }
+
     loop {
         match sensor.read().await {
             Ok(temp) => {
