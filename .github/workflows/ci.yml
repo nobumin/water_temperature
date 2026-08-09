@@ -86,6 +86,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # embassy ファミリが crates.io 版と git 版に分裂すると
+      # embassy-executor-timer-queue が 2 つ生成される。このクレートは
+      # integrated timer queue の状態をタスクヘッダ内に持つため、分裂すると
+      # タイムドライバとエグゼキュータが別々の状態を見て
+      # `Timer::after(..).await` が永久に復帰しなくなる(ビルドは通ってしまう)。
+      # ツールチェーン導入前に lock だけを検査し、早期に失敗させる。
+      - name: Check embassy crates are unified (firmware-esp32)
+        shell: bash
+        run: |
+          set -uo pipefail
+          fail=0
+          for crate in embassy-executor embassy-executor-timer-queue \
+                       embassy-time embassy-time-driver embassy-time-queue-utils; do
+            count=$(grep -c "^name = \"${crate}\"$" Cargo.lock || true)
+            if [ "$count" -ne 1 ]; then
+              echo "::error file=firmware-esp32/Cargo.lock::${crate} が ${count} 個あります(1 個であるべき)。[patch.crates-io] の embassy rev 統一を確認してください。"
+              fail=1
+            fi
+            from_registry=$(grep -A2 "^name = \"${crate}\"$" Cargo.lock | grep '^source = ' | grep -c 'registry+' || true)
+            if [ "$from_registry" -ne 0 ]; then
+              echo "::error file=firmware-esp32/Cargo.lock::${crate} が crates.io から解決されています。git rev へ patch してください。"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "embassy ファミリは単一 rev に統一されています。"
+
       - name: Install Espressif Rust toolchain (Xtensa)
         uses: esp-rs/xtensa-toolchain@v1.6
         with:
