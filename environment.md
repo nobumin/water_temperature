@@ -234,10 +234,18 @@ defmt ログ（`info!` など）がホスト側に表示される。
 
 詳細は `test_procedure.md` を参照。
 
+**本ファームはオンデマンド検温方式**です。検温要求を出すまで測定は始まりません。
+
 1. スマホに **nRF Connect**（iOS/Android）等の BLE スキャナを入れる。
-2. スキャンで `PicoTemp` を探す。
-3. アドバタイズの Service Data（UUID 0x181A）に温度（センチ℃, LE）が載る。
-4. 接続して Environmental Sensing → Temperature(0x2A6E) を Read / Notify。
+2. スキャンで `PicoTemp` を探して **Connect**。
+3. **Environmental Sensing → Temperature(0x2A6E)** の **Notify を有効化**（↓の矢印アイコン）。
+4. **検温制御サービス `4d454153-0001-4a70-9c2f-3b1d5e7a9c00`** →
+   **検温要求 `4d454153-0002-4a70-9c2f-3b1d5e7a9c00`** に **任意の 1 バイトを Write**
+   （↑の矢印アイコン → 値に `01` を入力 → Send）。値は何でも構いません。
+5. 60 秒間、約 2 秒周期で温度が Notify されます。60 秒経つと自動停止します。
+   - 止まる前にもう一度 Write すると、**その時点から 60 秒**へ延長されます。
+6. アドバタイズの Service Data（UUID 0x181A）にも温度（センチ℃, LE）が載ります。
+   ただし**待受中は最後に測定した値**で、ライブの値ではありません。
 
 ## 7. トラブルシュート
 

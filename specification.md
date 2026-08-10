@@ -32,9 +32,12 @@ GATT ESS）とセンサ処理は共通で、**中核ロジック `core/` は両�
 +-----------+         +----------------+                 +-------------+
 ```
 
-- DS18B20 を 1-Wire で定期測定（既定 2 秒周期）。
-- 最新温度を 2 通りで提供:
-  1. **非接続アドバタイズ**: アドバタイズパケットの Service Data に温度を載せる。
+- **オンデマンド検温**: 常時測定はせず、スマートフォンからの**検温要求**（GATT Write）を
+  受けてから 60 秒間だけ測定する（既定 2 秒周期）。ウィンドウ中に再度要求を受けると延長される。
+  詳細は 5.4 節。
+- 温度を 2 通りで提供:
+  1. **非接続アドバタイズ**: アドバタイズパケットの Service Data に温度を載せる
+     （待受中は最後に測定した値）。
   2. **接続型 GATT**: Environmental Sensing Service の Temperature 特性で Read / Notify。
 
 ## 2. ハードウェア構成
@@ -211,9 +214,11 @@ Cargo ワークスペース（`firmware` / `firmware-esp32` は target・ツー�
 
 ### 3.2 `firmware` クレート
 
-- `main.rs`: embassy executor 起動、DS18B20 タスク、CYW43 初期化、BLE 起動。
+- `main.rs`: embassy executor 起動、DS18B20 タスク（検温ウィンドウの状態機械を所有）、
+  CYW43 初期化、BLE 起動。
 - `onewire.rs`: 1-Wire ビットバンギング DS18B20 ドライバ（`critical_section` でスロット保護）。
-- `ble.rs`: `trouble-host` によるアドバタイズ + GATT ESS。
+- `ble.rs`: `trouble-host` によるアドバタイズ + GATT ESS + 検温制御サービス。
+  タスク間連携は `REQUEST`（検温要求）と `READING`（測定完了）の 2 本の `Signal` のみ。
 
 依存の要点（`firmware/Cargo.toml`、Cargo.lock で固定）:
 - embassy 各クレートは git rev `1d3c3de` に固定（trouble 公式 rp-pico-w 例と同一）。
@@ -344,24 +349,64 @@ esp-hal が `ets_update_cpu_frequency_rom()` を呼ぶため、`CpuClock::max()`
 | Service Data - 16bit UUID(0x16) | UUID=0x181A + 温度2バイト（sint16, センチ℃, LE） |
 | Complete Local Name(0x09) | `PicoTemp` |
 
-- 未接続時は `ADV_REFRESH_SECS`（既定 10 秒）ごとにアドバタイズを更新（最新温度を反映）。
+- アドバタイズ間隔は `ADV_INTERVAL_MS`（既定 1000ms）。trouble-host のデフォルト 160ms は
+  発見の速さ優先で電力的に不利なため、待受時間が支配的な本用途では長めにしている。
+- 未接続時は `ADV_REFRESH_SECS`（既定 60 秒）ごとにアドバタイズを貼り直す（最新温度を反映）。
+- **待受中の Service Data は「最後に測定した値」**であり、ライブの値ではない。
+  一度も測定していない場合は 0 を載せる。
 
 ### 5.3 GATT（接続で温度取得）
 
 | Service | Characteristic | UUID | プロパティ | 値 |
 | --- | --- | --- | --- | --- |
 | Environmental Sensing (0x181A) | Temperature | 0x2A6E | Read / Notify | sint16, センチ℃, LE |
+| 検温制御（カスタム）<br>`4d454153-0001-4a70-9c2f-3b1d5e7a9c00` | 検温要求<br>`4d454153-0002-4a70-9c2f-3b1d5e7a9c00` | 上記 | Read / Write | uint8（値は不問） |
 
-- 接続中は `NOTIFY_PERIOD_SECS`（既定 2 秒）ごとに最新温度を Notify。
+- Temperature の Notify は**検温中のみ**。測定が完了するたびに送る（固定周期ではない）。
 - Read 時は最新の測定値を返す。
+- 検温要求 characteristic に**何か書き込むと検温が始まる**（値は問わない）。詳細は 5.4 節。
+- ESS の Temperature（0x2A6E）は仕様上 Read/Notify のみのため、そこに `write` を足さず
+  別サービスとして制御用 characteristic を設けている。UUID の先頭 4 バイトは ASCII `MEAS`。
+
+### 5.4 オンデマンド検温（動作モデル）
+
+常時測定はしない。ユーザからの**検温要求**を受けてから一定時間だけ測定・送信する。
+
+```
+IDLE（待受）── 検温要求 ──► MEASURING（deadline = now + 60s）
+  ▲                            │  ・SENSOR_PERIOD_SECS ごとに測定して Notify
+  │                            │  ・要求を再受信 → deadline = now + 60s（延長）
+  └──── now >= deadline ───────┘
+```
+
+| 状態 | 測定 | Notify | アドバタイズ |
+| --- | --- | --- | --- |
+| IDLE（待受） | しない | しない | する（最終測定値を Service Data に載せる） |
+| MEASURING（検温中） | する | する | 接続中のため停止 |
+
+- 延長は**要求を受けた時点から `MEASURE_WINDOW_SECS` 秒**へ取り直す
+  （残り時間への加算ではなくスライディング方式）。
+- 検温要求は `Signal` で受けるため、測定中（最大 750ms のブロッキング）に届いた要求も
+  取りこぼさない。
+- 将来ボタン等のトリガを追加する場合も、`ble::REQUEST` へ合流させれば BLE 側の変更は不要。
+
+> **なぜ deep sleep にしないのか**: BLE の原理上、無線を落とすと検温要求を受信できない。
+> そのため待受中もコネクタブルアドバタイズを継続する。真の deep sleep（µA）には
+> 物理ボタン等の GPIO 起床が必要になる。
+>
+> 本方式で削減できるのは「測定・Notify の停止」と「アドバタイズ間隔の延長」の分のみで、
+> 消費電流の支配要因である CPU と無線のアイドル電流は下がらない。
+> **本方式の主目的は電力削減ではなく、要求されたときだけ測るという動作そのもの**である。
 
 ## 6. 動作パラメータ（既定値）
 
 | パラメータ | 既定 | 定義箇所 |
 | --- | --- | --- |
-| センサ測定周期 | 2 秒 | `main.rs: SENSOR_PERIOD_SECS` |
-| アドバタイズ更新周期 | 10 秒 | `ble.rs: ADV_REFRESH_SECS` |
-| Notify 周期 | 2 秒 | `ble.rs: NOTIFY_PERIOD_SECS` |
+| 検温ウィンドウ | 60 秒 | `main.rs: MEASURE_WINDOW_SECS` |
+| 検温中の測定周期 | 2 秒 | `main.rs: SENSOR_PERIOD_SECS` |
+| アドバタイズ間隔 | 1000ms | `ble.rs: ADV_INTERVAL_MS` |
+| アドバタイズ貼り直し周期 | 60 秒 | `ble.rs: ADV_REFRESH_SECS` |
+| Notify | 測定完了ごと | `ble.rs: notify_task`（`READING` 駆動） |
 | 変換待ち | 750ms | `onewire.rs: CONVERSION_TIME_MS` |
 
 ## 7. エラー処理
