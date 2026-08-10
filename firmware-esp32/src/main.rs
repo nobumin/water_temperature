@@ -22,8 +22,8 @@ mod onewire;
 
 use core::sync::atomic::Ordering;
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_futures::select::{select3, Either3};
+use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::Flex;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -74,11 +74,17 @@ async fn measure_once(sensor: &mut Ds18b20<'_>) {
 /// 状態遷移:
 /// - **IDLE**: [`REQUEST`] を待つ。測定も送信もしない
 /// - **MEASURING**: `deadline` まで [`SENSOR_PERIOD_SECS`] 秒ごとに測定
-///   - ウィンドウ中に再度要求を受けたら `deadline` をその時点から取り直す(延長)
-///   - `deadline` を過ぎたら IDLE へ戻る
+///   - ウィンドウ中に再度要求を受けたら、**その要求の受信時刻**を起点に取り直す(延長)
+///   - `deadline` に達した時点で即座に IDLE へ戻る
+///
+/// `deadline` は測定周期と同時に `select3` で待つため、期限到達から測定周期ぶん
+/// 遅れて停止することはない。
 ///
 /// [`REQUEST`] は Signal なので、測定中(最大 750ms のブロッキング)に届いた要求も
-/// 取りこぼさず次の `select` で拾える。
+/// 取りこぼさず次の `select3` で拾える。起点のずれを避けるため、受信時刻は
+/// GATT 側で採って Signal に載せている。
+///
+/// 1 回の要求につき**最低 1 回は測定する**(ウィンドウ判定より前に測定するため)。
 #[embassy_executor::task]
 async fn sensor_task(pin: Flex<'static>) {
     let mut sensor = Ds18b20::new(pin);
@@ -102,19 +108,27 @@ async fn sensor_task(pin: Flex<'static>) {
     let window = Duration::from_secs(MEASURE_WINDOW_SECS);
     loop {
         // --- IDLE ---
-        REQUEST.wait().await;
+        let received_at = REQUEST.wait().await;
         info!("検温開始: {} 秒間 測定します", MEASURE_WINDOW_SECS);
 
         // --- MEASURING ---
-        let mut deadline = Instant::now() + window;
-        while Instant::now() < deadline {
+        let mut deadline = received_at + window;
+        loop {
             measure_once(&mut sensor).await;
-            match select(Timer::after_secs(SENSOR_PERIOD_SECS), REQUEST.wait()).await {
+            match select3(
+                Timer::at(deadline),
+                Timer::after_secs(SENSOR_PERIOD_SECS),
+                REQUEST.wait(),
+            )
+            .await
+            {
+                // ウィンドウ終了。
+                Either3::First(_) => break,
                 // 次の測定タイミング。
-                Either::First(_) => {}
-                // 検温要求の再受信。この時点から測り直す。
-                Either::Second(_) => {
-                    deadline = Instant::now() + window;
+                Either3::Second(_) => {}
+                // 検温要求の再受信。受信時刻を起点に測り直す。
+                Either3::Third(received_at) => {
+                    deadline = received_at + window;
                     info!("検温要求を再受信: ウィンドウを延長しました");
                 }
             }

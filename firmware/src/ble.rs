@@ -21,7 +21,7 @@ use embassy_futures::join::join;
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use pico_temp_core::ess::ESS_SERVICE_UUID;
 use portable_atomic::{AtomicI16, Ordering};
 use trouble_host::prelude::*;
@@ -35,8 +35,12 @@ pub static TEMP_CENTI: AtomicI16 = AtomicI16::new(NO_READING);
 
 /// 検温要求。制御 characteristic への Write で発火する。
 ///
-/// 将来ボタン等のトリガを追加する場合も、ここへ `signal(())` すれば同じ経路に乗る。
-pub static REQUEST: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+/// **受信時刻を載せる**のは、センサタスク側で `Instant::now()` を取ると測定処理
+/// (最大 750ms のブロッキング)のぶん起点が後ろ倒しになり、「その時点から＋1 分」
+/// という要件からずれるため。
+///
+/// 将来ボタン等のトリガを追加する場合も、ここへ受信時刻を `signal()` すれば同じ経路に乗る。
+pub static REQUEST: Signal<CriticalSectionRawMutex, Instant> = Signal::new();
 
 /// 新しい測定値ができたことをセンサタスクから Notify タスクへ伝える。
 ///
@@ -242,8 +246,9 @@ async fn gatt_events_task<P: PacketPool>(
                 // 応答の前に検温要求を拾う(accept() が event を消費するため参照で判定する)。
                 if let GattEvent::Write(write) = &event {
                     if write.handle() == request_handle {
+                        // 受信時刻をここで採る(センサタスク側で採ると測定時間ぶんずれる)。
                         info!("[gatt] 検温要求を受信");
-                        REQUEST.signal(());
+                        REQUEST.signal(Instant::now());
                     }
                 }
                 // いずれのイベントも受理して応答する。
