@@ -30,6 +30,8 @@ esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32"] }
 embassy-executor = "0.10.0"
 embassy-time = "0.5.1"
 embassy-futures = "0.1.2"
+# 検温要求／測定値のタスク間通知に Signal を使う(Pico W 版も同じ 0.8 系)。
+embassy-sync = "0.8"
 
 # BLE ホストスタック。esp-radio の BleConnector を bt-hci コントローラとして使う。
 # rev は Pico W 版(firmware/Cargo.lock)と同じものに固定し、両ファームで

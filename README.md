@@ -8,9 +8,12 @@ DS18B20 温度センサの測定値を **BLE（Bluetooth Low Energy）** でス�
   - ESP-WROOM-32D (ESP32-D0WD, BT 内蔵) … `firmware-esp32/`
 - **センサ**: DS18B20（1-Wire デジタル温度センサ）
 - **言語**: Rust（[embassy](https://embassy.dev/) / `trouble-host` / `cyw43` / `esp-hal`）
+- **動作モデル**: **オンデマンド検温**。常時測定はせず、スマホからの検温要求（GATT Write）を
+  受けてから 60 秒間だけ測定・送信します。ウィンドウ中に再要求すると、その時点から延長されます。
 - **BLE 提供方式**（両ボード共通）:
-  1. 非接続アドバタイズ（Service Data: Environmental Sensing 0x181A）
+  1. 非接続アドバタイズ（Service Data: Environmental Sensing 0x181A、待受中は最終測定値）
   2. 接続型 GATT（Environmental Sensing Service + Temperature 特性 0x2A6E）
+  3. 検温制御サービス（カスタム UUID、Write で検温を開始／延長）
 
 | | Pico W | ESP-WROOM-32D |
 | --- | --- | --- |
