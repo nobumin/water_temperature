@@ -62,6 +62,7 @@ cd firmware-esp32 && cargo build --release
 ```
 
 実機での書き込み・動作確認は `environment.md` と `test_procedure.md` を参照してください。
+電池駆動を検討する場合は `power_supply.md` を参照してください。
 
 ## ドキュメント
 
@@ -70,4 +71,5 @@ cd firmware-esp32 && cargo build --release
 | `specification.md` | 詳細仕様 |
 | `environment.md` | ローカル環境構築・実機セットアップ手順 |
 | `test_procedure.md` | テスト手順 |
+| `power_supply.md` | 電源設計メモ（電池選定・接続図・省電力・製品化の検討） |
 | `CLAUDE.md` | 開発運用ルール |
