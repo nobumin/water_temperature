@@ -35,6 +35,7 @@ Set-Location .\water_temperature
 | ブレッドボード・ジャンパ線 | 配線用 |
 | USB ケーブル | 書き込み・給電（Pico W: micro-B / ESP32 ボード: micro-B or USB-C） |
 | （任意）デバッグプローブ | Pico W 用。Raspberry Pi Debug Probe 等。probe-rs でのログ表示に使用 |
+| （任意）電池 | USB 以外で駆動する場合。**電池の選定と接続先は `power_supply.md` を参照**（ボタン電池は電流不足で使用不可） |
 
 ### 配線（`specification.md` 参照）
 
