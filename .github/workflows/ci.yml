@@ -1,0 +1,138 @@
+name: CI
+
+# develop / main / 作業ブランチへの push と、develop 向け PR で実行する。
+on:
+  push:
+    branches: [main, develop, "claude/**", "feature/**"]
+  pull_request:
+    branches: [develop, main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ---- 中核ロジック(ハードウェア非依存)のホスト検証。実機不要で CI 完結。 ----
+  core:
+    name: core (host test / clippy / fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check (workspace)
+        run: cargo fmt --all --check
+
+      - name: Clippy (core)
+        run: cargo clippy -p pico-temp-core --all-targets -- -D warnings
+
+      - name: Unit tests (core)
+        run: cargo test -p pico-temp-core
+
+  # ---- firmware のクロスコンパイル確認(thumbv6m)。CYW43 blob 無しでビルドできる ----
+  # ---- skip-cyw43-firmware フィーチャで、コードが組込みターゲットで通ることを検証する。 ----
+  firmware:
+    name: firmware (thumbv6m build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (thumbv6m)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware
+
+      - name: Format check (firmware)
+        run: cargo fmt --check
+
+      - name: Clippy (firmware, skip-cyw43-firmware)
+        run: cargo clippy --features skip-cyw43-firmware -- -D warnings
+
+      - name: Build (firmware, skip-cyw43-firmware)
+        run: cargo build --release --features skip-cyw43-firmware
+
+  # ---- ESP-WROOM-32D 版のクロスコンパイル確認(xtensa-esp32-none-elf)。 ----
+  # ---- Xtensa は stable Rust 非対応のため Espressif フォークを導入する。 ----
+  # ---- BT はチップ内蔵なので、Pico W 版と違い blob 無しでそのままビルドできる。 ----
+  firmware-esp32:
+    name: firmware-esp32 (xtensa-esp32 build)
+    runs-on: ubuntu-latest
+    # env RUSTFLAGS は .cargo/config.toml の rustflags を「置き換える」ため、
+    # firmware-esp32/.cargo/config.toml と同じ内容をここにも書く必要がある
+    # (-Tlinkall.x が無いと割り込みベクタのシンボルが undefined reference になる)。
+    # どちらかを変更したら必ず両方を合わせること。
+    # build-std で core/alloc も同じフラグでビルドされる点にも注意。
+    env:
+      RUSTFLAGS: "-C force-frame-pointers -C link-arg=-Tlinkall.x"
+    defaults:
+      run:
+        working-directory: firmware-esp32
+    steps:
+      - uses: actions/checkout@v4
+
+      # embassy ファミリが crates.io 版と git 版に分裂すると
+      # embassy-executor-timer-queue が 2 つ生成される。このクレートは
+      # integrated timer queue の状態をタスクヘッダ内に持つため、分裂すると
+      # タイムドライバとエグゼキュータが別々の状態を見て
+      # `Timer::after(..).await` が永久に復帰しなくなる(ビルドは通ってしまう)。
+      # ツールチェーン導入前に lock だけを検査し、早期に失敗させる。
+      - name: Check embassy crates are unified (firmware-esp32)
+        shell: bash
+        run: |
+          set -uo pipefail
+          fail=0
+          for crate in embassy-executor embassy-executor-timer-queue \
+                       embassy-time embassy-time-driver embassy-time-queue-utils; do
+            count=$(grep -c "^name = \"${crate}\"$" Cargo.lock || true)
+            if [ "$count" -ne 1 ]; then
+              echo "::error file=firmware-esp32/Cargo.lock::${crate} が ${count} 個あります(1 個であるべき)。[patch.crates-io] の embassy rev 統一を確認してください。"
+              fail=1
+            fi
+            from_registry=$(grep -A2 "^name = \"${crate}\"$" Cargo.lock | grep '^source = ' | grep -c 'registry+' || true)
+            if [ "$from_registry" -ne 0 ]; then
+              echo "::error file=firmware-esp32/Cargo.lock::${crate} が crates.io から解決されています。git rev へ patch してください。"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "embassy ファミリは単一 rev に統一されています。"
+
+      - name: Install Espressif Rust toolchain (Xtensa)
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32
+          ldproxy: false
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware-esp32
+
+      - name: Format check (firmware-esp32)
+        run: cargo fmt --check
+
+      # 警告のエラー化は clippy へ明示的に渡す。RUSTFLAGS に -D warnings を足すと
+      # build-std(core/alloc)や git 由来の esp-* クレートまで対象になり、
+      # 上流の警告 1 つで CI が落ちるため、ここでは自クレートのみを厳格化する。
+      - name: Clippy (firmware-esp32)
+        run: cargo clippy --release -- -D warnings
+
+      - name: Build (firmware-esp32)
+        run: cargo build --release

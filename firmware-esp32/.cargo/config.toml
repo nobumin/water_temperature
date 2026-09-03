@@ -1,0 +1,23 @@
+[build]
+target = "xtensa-esp32-none-elf"
+# 注意: CI では workflow の env RUSTFLAGS がこの rustflags を「置き換える」ため、
+# ここを変更したら .github/workflows/ci.yml の firmware-esp32 ジョブも合わせること。
+rustflags = [
+  # esp-backtrace でバックトレースを得るために必要。
+  "-C", "force-frame-pointers",
+  # esp-hal のリンカスクリプト。これが無いと esp-pacs の割り込みベクタ
+  # (__EXTERNAL_INTERRUPTS)が参照する WIFI_MAC / GPIO / UART0 等の
+  # デフォルトハンドラ PROVIDE が定義されず、undefined reference になる。
+  "-C", "link-arg=-Tlinkall.x",
+]
+
+[target.xtensa-esp32-none-elf]
+# `cargo run --release` で実機へ書き込み、シリアルモニタを開く。
+runner = "espflash flash --monitor"
+
+[env]
+ESP_LOG = "info"
+
+# Xtensa は LLVM 本家未対応のため、Espressif フォークで core/alloc を自前ビルドする。
+[unstable]
+build-std = ["alloc", "core"]
