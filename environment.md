@@ -248,6 +248,37 @@ defmt ログ（`info!` など）がホスト側に表示される。
 6. アドバタイズの Service Data（UUID 0x181A）にも温度（センチ℃, LE）が載ります。
    ただし**待受中は最後に測定した値**で、ライブの値ではありません。
 
+### 6.1 Web UI（`webapp/index.html`）で温度を見る
+
+nRF Connect の代わりに、同梱の **Web Bluetooth クライアント**からも操作できます。
+ボタンを押すと検温要求を送り、温度が 60 秒間更新されます。
+
+**動作条件**
+
+| 項目 | 要件 |
+| --- | --- |
+| ブラウザ | **Android Chrome**（iOS の Safari / Chrome は Web Bluetooth 非対応） |
+| 配信方法 | **HTTPS 必須**。`file://` や `http://` では動作しません（`localhost` は例外） |
+| その他 | Bluetooth を ON に。Android のバージョンによっては位置情報サービスの有効化も必要 |
+
+**公開方法の例**
+
+- **GitHub Pages**: リポジトリの Settings → Pages で公開元ブランチを選び、フォルダは **`/ (root)`** を指定する。
+  公開後 `https://<ユーザー名>.github.io/<リポジトリ名>/webapp/` でアクセスできる（最も手軽）。
+  ※ Pages のフォルダ指定は `/ (root)` と `/docs` の 2 択で、`/webapp` は直接選べない
+- **PC でローカル配信**: 自己署名証明書つきの HTTPS サーバを立てて LAN 越しにアクセス
+- **Android 端末で直接**: `chrome://inspect` のポートフォワードで PC の `localhost` を転送
+
+**使い方**
+
+1. Android Chrome で公開した `index.html` を開く
+2. **「温度を取得」** をタップ → デバイス選択ダイアログで `PicoTemp` を選ぶ
+3. 接続後、自動で検温要求が送られ、約 2 秒ごとに温度が更新される
+4. 60 秒でカウントダウンが終わり更新が止まる。**「延長する」** を押すとその時点から 60 秒に延長される
+
+> ページを閉じたり他アプリに切り替えると受信は止まります（Web Bluetooth の制約）。
+> 実装の詳細は `webapp/index.html` 内のコメントを参照してください。
+
 ## 7. トラブルシュート
 
 **共通**
@@ -278,3 +309,13 @@ defmt ログ（`info!` など）がホスト側に表示される。
 | `DS18B20 ROM read error` が出る／ファミリコードが 0x28 でない | 起動時セルフテストの失敗。1-Wire 通信が成立していない。配線・プルアップ・GPIO 番号を確認する。バス上にセンサが 2 個以上あると Read ROM は必ず失敗する（その場合はセルフテストの失敗を無視してよい）。 |
 | `CrcMismatch` が続く | 直前の `[1-Wire] scratchpad raw = [..]` の生バイト列で切り分ける。<br>・**1 に偏る（0xFF が多い）** → 読み取りサンプル点が遅い。`onewire.rs` の `read_bit` の待機値を短くする。<br>・**毎回ランダムに散る** → タイミング擾乱。ビットバンギングを free 関数化して `#[esp_hal::ram]` で IRAM 配置を検討。<br>・**全 0x00** → 給電またはプルアップの物理的な問題。 |
 | 温度が 0.00 で固定され、`DS18B20` のログが**1 行も出ない**（BLE は正常に広告・接続できる） | embassy のタイマが動いていない。`Cargo.lock` で embassy クレートが crates.io 版と git 版に**分裂**していないか確認する。<br>`grep -c 'name = "embassy-executor-timer-queue"' firmware-esp32/Cargo.lock` が **1** でなければ該当。<br>対処: `firmware-esp32/Cargo.toml` の `[patch.crates-io]` で embassy ファミリ（`embassy-time` / `embassy-time-driver` / `embassy-time-queue-utils` / `embassy-executor-timer-queue` 等）を**すべて同一 rev**へ固定し、lock を再生成する。<br>詳細は `specification.md` の「ESP32 版の依存方針」を参照。 |
+
+**Web UI（`webapp/index.html`）**
+
+| 症状 | 対処 |
+| --- | --- |
+| 「Web Bluetooth に対応していません」と出る | iOS（Safari / Chrome とも非対応）や PC の非対応ブラウザ。**Android Chrome** を使う。 |
+| 「HTTPS でアクセスしてください」と出る | `file://` や `http://` で開いている。HTTPS で配信するか `localhost` を使う。 |
+| デバイス選択に `PicoTemp` が出ない | ボードの給電・書き込みを確認。Bluetooth が ON か、Android のバージョンによっては位置情報サービスが有効かも確認。 |
+| 温度が更新されない | 60 秒のウィンドウが終了している可能性。「延長する」を押す。切断された場合はもう一度ボタンを押して接続し直す。 |
+| 画面を切り替えたら止まった | Web Bluetooth の仕様。ページを前面に保つ必要がある。 |

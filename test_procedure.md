@@ -104,6 +104,9 @@ PR が緑になることを Copilot レビュー前の前提とする。
 
 ### L3-2. 検温要求 → 60 秒間の測定（本機能の中核）
 
+> nRF Connect の代わりに **`webapp/index.html`（Web UI）** でも同じ操作ができます。
+> その場合は手順 1〜3 をまとめて「温度を取得」ボタン 1 つで実行できます（`environment.md` 6.1）。
+
 1. nRF Connect で `PicoTemp` に **Connect**。
 2. **Environmental Sensing Service (0x181A)** → **Temperature (0x2A6E)** の **Notify を有効化**。
 3. **検温制御サービス `4d454153-0001-...`** → **検温要求 `4d454153-0002-...`** に

@@ -37,6 +37,7 @@ DS18B20 温度センサの測定値を **BLE（Bluetooth Low Energy）** でス�
 | `core/` | ハードウェア非依存ロジック（温度変換・CRC・ESS エンコード, `no_std`, ホストでテスト可）。**両ファームで共有** |
 | `firmware/` | Pico W 向け組込みバイナリ（embassy + cyw43 + trouble-host, `thumbv6m-none-eabi`） |
 | `firmware-esp32/` | ESP-WROOM-32D 向け組込みバイナリ（esp-hal + esp-radio + trouble-host, `xtensa-esp32-none-elf`） |
+| `webapp/` | Web Bluetooth クライアント（Android Chrome から温度取得。HTML + JS 単体、ビルド不要） |
 | `scripts/` | CYW43 ファームウェア blob 取得スクリプト等（Pico W 用） |
 | `.github/workflows/` | CI |
 
@@ -63,6 +64,9 @@ cd firmware-esp32 && cargo build --release
 
 実機での書き込み・動作確認は `environment.md` と `test_procedure.md` を参照してください。
 電池駆動を検討する場合は `power_supply.md` を参照してください。
+
+スマートフォンから温度を見るには **nRF Connect** のほか、同梱の Web UI（`webapp/index.html`）も使えます。
+Android Chrome + HTTPS が必要です（詳細は `environment.md` 6.1）。
 
 ## ドキュメント
 
