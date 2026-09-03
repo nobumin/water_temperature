@@ -263,7 +263,9 @@ nRF Connect の代わりに、同梱の **Web Bluetooth クライアント**か�
 
 **公開方法の例**
 
-- **GitHub Pages**: リポジトリの Settings → Pages で `webapp/` を公開（最も手軽）
+- **GitHub Pages**: リポジトリの Settings → Pages で公開元ブランチを選び、フォルダは **`/ (root)`** を指定する。
+  公開後 `https://<ユーザー名>.github.io/<リポジトリ名>/webapp/` でアクセスできる（最も手軽）。
+  ※ Pages のフォルダ指定は `/ (root)` と `/docs` の 2 択で、`/webapp` は直接選べない
 - **PC でローカル配信**: 自己署名証明書つきの HTTPS サーバを立てて LAN 越しにアクセス
 - **Android 端末で直接**: `chrome://inspect` のポートフォワードで PC の `localhost` を転送
 

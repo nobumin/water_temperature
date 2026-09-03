@@ -241,30 +241,47 @@ function onDisconnected() {
   setStatus("切断されました。もう一度ボタンを押してください。");
 }
 
-/** デバイス選択 → 接続 → Notify 購読まで。 */
-async function connect() {
-  setStatus("デバイスを選択してください…");
+/**
+ * 接続の準備を整える（デバイス選択 → GATT 接続 → characteristic 解決）。
+ *
+ * 3 段階を個別に判定するため**再入可能**。途中で失敗しても、次回は未完了の
+ * 段階だけをやり直せる（デバイス選択ダイアログを再表示せずに復旧できる）。
+ */
+async function ensureConnected() {
+  if (!device) {
+    setStatus("デバイスを選択してください…");
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
+      // アクセスするサービスは事前申告が必要（Web Bluetooth の仕様）
+      optionalServices: [ESS_SERVICE, CONTROL_SERVICE],
+    });
+    // 同一の関数参照なので、再接続で何度呼ばれても登録は 1 つに保たれる
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+  }
 
-  device = await navigator.bluetooth.requestDevice({
-    filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
-    // アクセスするサービスは事前申告が必要（Web Bluetooth の仕様）
-    optionalServices: [ESS_SERVICE, CONTROL_SERVICE],
-  });
-  device.addEventListener("gattserverdisconnected", onDisconnected);
+  if (!device.gatt.connected) {
+    setStatus("接続中…");
+    await device.gatt.connect();
+  }
 
-  setStatus("接続中…");
-  const server = await device.gatt.connect();
+  // ここが未完了のまま抜けると sendRequest() が失敗するため、
+  // requestChar の有無を「準備完了」の判定に使う。
+  if (!requestChar) {
+    setStatus("サービスを取得中…");
+    const server = device.gatt;
 
-  // 温度 Notify を購読
-  const ess = await server.getPrimaryService(ESS_SERVICE);
-  const temperature = await ess.getCharacteristic(TEMPERATURE_CHAR);
-  temperature.addEventListener("characteristicvaluechanged", onTemperatureChanged);
-  await temperature.startNotifications();
+    // 温度 Notify を購読
+    const ess = await server.getPrimaryService(ESS_SERVICE);
+    const temperature = await ess.getCharacteristic(TEMPERATURE_CHAR);
+    temperature.addEventListener("characteristicvaluechanged", onTemperatureChanged);
+    await temperature.startNotifications();
 
-  // 検温要求の書き込み先を保持
-  const control = await server.getPrimaryService(CONTROL_SERVICE);
-  requestChar = await control.getCharacteristic(REQUEST_CHAR);
+    // 検温要求の書き込み先を保持（最後に代入して準備完了とする）
+    const control = await server.getPrimaryService(CONTROL_SERVICE);
+    requestChar = await control.getCharacteristic(REQUEST_CHAR);
+  }
 }
+
 
 /** 検温要求を送る（値は不問。ファーム側は書き込みがあれば要求とみなす）。 */
 async function sendRequest() {
@@ -280,9 +297,10 @@ async function sendRequest() {
 async function onClick() {
   $btn.disabled = true;
   try {
-    if (!device || !device.gatt.connected) {
+    // requestChar まで揃って初めて「準備完了」。途中失敗の状態からも復旧する。
+    if (!device || !device.gatt.connected || !requestChar) {
       clearTemperature();
-      await connect();
+      await ensureConnected();
     }
     setStatus("検温を要求しました。", "ok");
     await sendRequest();
