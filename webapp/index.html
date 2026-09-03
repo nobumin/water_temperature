@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>PicoTemp — 温度計</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --fg: #1a1d21;
+    --muted: #6b7280;
+    --line: #e3e6ea;
+    --accent: #1f6feb;
+    --accent-press: #1a5fd0;
+    --ok: #157f3d;
+    --err: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a;
+      --card: #1d2126;
+      --fg: #e8eaed;
+      --muted: #9aa3ad;
+      --line: #2c3238;
+      --accent: #4c8dff;
+      --accent-press: #3d78e0;
+      --ok: #4ec77f;
+      --err: #ff6b5e;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans JP", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 28px 22px 22px;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 0 0 22px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+
+  /* 温度表示 */
+  .reading {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+    margin: 8px 0 6px;
+    /* 数字の幅が揺れないように等幅数字を使う */
+    font-variant-numeric: tabular-nums;
+  }
+  .value {
+    font-size: 68px;
+    font-weight: 300;
+    line-height: 1;
+    letter-spacing: -.02em;
+  }
+  .value.idle { color: var(--muted); }
+  .unit { font-size: 24px; font-weight: 400; color: var(--muted); }
+
+  .sub {
+    min-height: 20px;
+    margin: 0 0 22px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ボタン */
+  button {
+    width: 100%;
+    padding: 16px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  button:active:not(:disabled) { background: var(--accent-press); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  /* 状態表示 */
+  .status {
+    margin-top: 16px;
+    min-height: 36px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .status.ok  { color: var(--ok); }
+  .status.err { color: var(--err); }
+
+  .hint {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    text-align: left;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>PicoTemp</h1>
+
+    <div class="reading">
+      <span class="value idle" id="value">--.--</span>
+      <span class="unit">℃</span>
+    </div>
+    <p class="sub" id="sub"></p>
+
+    <button id="btn">温度を取得</button>
+
+    <p class="status" id="status">ボタンを押すとデバイスを選択します。</p>
+
+    <div class="hint" id="hint"></div>
+  </main>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------
+ * PicoTemp Web Bluetooth クライアント
+ *
+ * ファーム側は「オンデマンド検温」方式:
+ *   検温要求(Write) → MEASURE_WINDOW 秒だけ測定して Notify → 待受へ戻る
+ *   ウィンドウ中に再度 Write すると、その時点から測り直し(延長)
+ *
+ * 仕様は specification.md 5.3 / 5.4 節を参照。
+ * ------------------------------------------------------------------ */
+
+// --- BLE 定義（specification.md と一致させること） ---
+const DEVICE_NAME_PREFIX = "PicoTemp";
+const ESS_SERVICE        = 0x181a;   // Environmental Sensing
+const TEMPERATURE_CHAR   = 0x2a6e;   // Temperature (sint16, センチ℃, LE)
+const CONTROL_SERVICE    = "4d454153-0001-4a70-9c2f-3b1d5e7a9c00";
+const REQUEST_CHAR       = "4d454153-0002-4a70-9c2f-3b1d5e7a9c00";
+
+// ファーム側の MEASURE_WINDOW_SECS と合わせる（表示用のカウントダウンにのみ使用）
+const MEASURE_WINDOW_SECS = 60;
+
+const $value  = document.getElementById("value");
+const $sub    = document.getElementById("sub");
+const $btn    = document.getElementById("btn");
+const $status = document.getElementById("status");
+const $hint   = document.getElementById("hint");
+
+let device = null;
+let requestChar = null;
+let countdownTimer = null;
+let remainingSecs = 0;
+
+/** 状態メッセージを表示する。kind は "" | "ok" | "err"。 */
+function setStatus(text, kind = "") {
+  $status.textContent = text;
+  $status.className = "status" + (kind ? " " + kind : "");
+}
+
+function setTemperature(celsius) {
+  $value.textContent = celsius.toFixed(2);
+  $value.classList.remove("idle");
+}
+
+function clearTemperature() {
+  $value.textContent = "--.--";
+  $value.classList.add("idle");
+  $sub.textContent = "";
+}
+
+/** 検温ウィンドウの残り時間表示。ファーム側の停止タイミングに合わせた目安。 */
+function startCountdown() {
+  stopCountdown();
+  remainingSecs = MEASURE_WINDOW_SECS;
+  $sub.textContent = `計測中… 残り ${remainingSecs} 秒`;
+  countdownTimer = setInterval(() => {
+    remainingSecs -= 1;
+    if (remainingSecs > 0) {
+      $sub.textContent = `計測中… 残り ${remainingSecs} 秒`;
+    } else {
+      stopCountdown();
+      $sub.textContent = "計測終了（最後の値を表示中）";
+      $btn.textContent = "再度 取得";
+    }
+  }, 1000);
+}
+
+function stopCountdown() {
+  if (countdownTimer !== null) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
+/** 温度 Notify の受信ハンドラ。sint16・リトルエンディアン・センチ℃。 */
+function onTemperatureChanged(event) {
+  const centi = event.target.value.getInt16(0, /* littleEndian */ true);
+  setTemperature(centi / 100);
+}
+
+function onDisconnected() {
+  stopCountdown();
+  device = null;
+  requestChar = null;
+  $btn.disabled = false;
+  $btn.textContent = "温度を取得";
+  $sub.textContent = "";
+  setStatus("切断されました。もう一度ボタンを押してください。");
+}
+
+/** デバイス選択 → 接続 → Notify 購読まで。 */
+async function connect() {
+  setStatus("デバイスを選択してください…");
+
+  device = await navigator.bluetooth.requestDevice({
+    filters: [{ namePrefix: DEVICE_NAME_PREFIX }],
+    // アクセスするサービスは事前申告が必要（Web Bluetooth の仕様）
+    optionalServices: [ESS_SERVICE, CONTROL_SERVICE],
+  });
+  device.addEventListener("gattserverdisconnected", onDisconnected);
+
+  setStatus("接続中…");
+  const server = await device.gatt.connect();
+
+  // 温度 Notify を購読
+  const ess = await server.getPrimaryService(ESS_SERVICE);
+  const temperature = await ess.getCharacteristic(TEMPERATURE_CHAR);
+  temperature.addEventListener("characteristicvaluechanged", onTemperatureChanged);
+  await temperature.startNotifications();
+
+  // 検温要求の書き込み先を保持
+  const control = await server.getPrimaryService(CONTROL_SERVICE);
+  requestChar = await control.getCharacteristic(REQUEST_CHAR);
+}
+
+/** 検温要求を送る（値は不問。ファーム側は書き込みがあれば要求とみなす）。 */
+async function sendRequest() {
+  const payload = Uint8Array.of(0x01);
+  // 古い Chrome では writeValue のみのため、無い場合はフォールバックする
+  if (requestChar.writeValueWithResponse) {
+    await requestChar.writeValueWithResponse(payload);
+  } else {
+    await requestChar.writeValue(payload);
+  }
+}
+
+async function onClick() {
+  $btn.disabled = true;
+  try {
+    if (!device || !device.gatt.connected) {
+      clearTemperature();
+      await connect();
+    }
+    setStatus("検温を要求しました。", "ok");
+    await sendRequest();
+    startCountdown();
+    $btn.textContent = "延長する";
+  } catch (err) {
+    stopCountdown();
+    // ユーザーが選択ダイアログを閉じた場合はエラー扱いしない
+    if (err && err.name === "NotFoundError") {
+      setStatus("デバイスが選択されませんでした。");
+    } else {
+      setStatus(`エラー: ${err && err.message ? err.message : err}`, "err");
+    }
+  } finally {
+    $btn.disabled = false;
+  }
+}
+
+/** 実行環境の確認。満たさない場合はボタンを無効化して理由を出す。 */
+function checkEnvironment() {
+  const notes = [];
+
+  if (!navigator.bluetooth) {
+    $btn.disabled = true;
+    setStatus(
+      "このブラウザは Web Bluetooth に対応していません。\n" +
+      "Android の Chrome をお使いください（iOS は非対応です）。",
+      "err"
+    );
+    return;
+  }
+  if (!window.isSecureContext) {
+    $btn.disabled = true;
+    setStatus(
+      "HTTPS でアクセスしてください。\n" +
+      "file:// や http:// では Web Bluetooth は動作しません。",
+      "err"
+    );
+    return;
+  }
+
+  notes.push("接続後 60 秒間、約 2 秒ごとに温度が更新されます。");
+  notes.push("60 秒経過前にボタンを押すと、その時点から 60 秒に延長されます。");
+  notes.push("画面を閉じたり他アプリに切り替えると受信が止まります。");
+  $hint.textContent = notes.join("\n");
+}
+
+$btn.addEventListener("click", onClick);
+checkEnvironment();
+</script>
+</body>
+</html>
