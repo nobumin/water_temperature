@@ -92,6 +92,7 @@
 
         const device = await navigator.bluetooth.requestDevice({
           filters: [{ services: [ENV_SENSE_SERVICE_UUID] }],
+          optionalServices: [ENV_SENSE_SERVICE_UUID],
         });
 
         device.addEventListener('gattserverdisconnected', () => {

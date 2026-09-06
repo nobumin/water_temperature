@@ -82,7 +82,11 @@ class WaterTemperatureSensor:
 
     def read_celsius(self):
         self._ds.convert_temp()
-        time.sleep_ms(750)  # DS18B20 needs up to 750ms for a 12-bit reading
+        # DS18B20 needs up to 750ms for a 12-bit reading. This blocks the
+        # main loop, but BLE connect/disconnect events are still delivered
+        # via the MicroPython BLE stack's own IRQ scheduling, so a central
+        # connecting during this window is only delayed, not missed.
+        time.sleep_ms(750)
         return self._ds.read_temp(self._roms[0])
 
 
@@ -142,6 +146,8 @@ def main():
             temp_service.set_temperature(temp_c)
         except onewire.OneWireError:
             print("DS18B20 read error, retrying...")
+        except Exception as exc:  # noqa: BLE001 - keep the sensor loop alive
+            print("unexpected error, retrying:", exc)
         time.sleep_ms(_MEASURE_INTERVAL_MS)
 
 
