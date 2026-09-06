@@ -71,7 +71,12 @@ def _advertising_payload(name, services, appearance=0):
 
 
 class WaterTemperatureSensor:
-    """Reads a DS18B20 sensor connected to the given pin."""
+    """Reads a DS18B20 sensor connected to the given pin.
+
+    Assumes a single, fixed DS18B20 is present for the device's lifetime;
+    the bus is scanned once during initialization and the ROM code found
+    then is reused for every subsequent reading.
+    """
 
     def __init__(self, pin_no=_ONEWIRE_PIN):
         self._ow = onewire.OneWire(machine.Pin(pin_no))

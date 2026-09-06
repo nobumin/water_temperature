@@ -67,6 +67,12 @@ void setup() {
   Serial.begin(115200);
   sensors.begin();
 
+  int deviceCount = sensors.getDeviceCount();
+  Serial.printf("Found %d DS18B20 sensor(s) on the OneWire bus\n", deviceCount);
+  if (deviceCount == 0) {
+    Serial.println("WARNING: no DS18B20 detected, check wiring/pull-up resistor");
+  }
+
   BLEDevice::init("WaterTemp");
   bleServer = BLEDevice::createServer();
   bleServer->setCallbacks(new ServerCallbacks());
