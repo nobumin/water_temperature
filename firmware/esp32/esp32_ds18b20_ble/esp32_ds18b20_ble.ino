@@ -92,6 +92,8 @@ void loop() {
     lastMeasureMs = now;
 
     sensors.requestTemperatures();
+    // Blocks for up to ~750ms while the DS18B20 performs a 12-bit
+    // conversion (DallasTemperature's default wait-for-conversion mode).
     float tempC = sensors.getTempCByIndex(0);
 
     if (tempC == DEVICE_DISCONNECTED_C) {

@@ -147,7 +147,7 @@ def main():
         except onewire.OneWireError:
             print("DS18B20 read error, retrying...")
         except Exception as exc:  # noqa: BLE001 - keep the sensor loop alive
-            print("unexpected error, retrying:", exc)
+            print("unexpected error ({}), retrying: {}".format(type(exc).__name__, exc))
         time.sleep_ms(_MEASURE_INTERVAL_MS)
 
 
