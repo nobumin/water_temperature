@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>水温計 - Water Temperature</title>
+<style>
+  body {
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background: #0b3d59;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin-bottom: 0.5rem;
+  }
+  #temperature {
+    font-size: 4rem;
+    font-weight: bold;
+    margin: 1rem 0;
+  }
+  #status {
+    min-height: 1.5em;
+    opacity: 0.85;
+  }
+  button {
+    font-size: 1.1rem;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    background: #ffd166;
+    color: #0b3d59;
+    cursor: pointer;
+    margin-top: 1rem;
+  }
+  button:disabled {
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+  <h1>DIY デジタル水温計</h1>
+  <div id="temperature">--.- &deg;C</div>
+  <div id="status">Bluetooth デバイスに接続してください</div>
+  <button id="connect">水温計に接続 (Connect)</button>
+
+  <script>
+    // Must match the GATT UUIDs used by the Raspberry Pi Pico W and
+    // ESP-WROOM-32D firmware in this repository (firmware/pico_w/main.py and
+    // firmware/esp32/esp32_ds18b20_ble/esp32_ds18b20_ble.ino).
+    const ENV_SENSE_SERVICE_UUID = 0x181a; // Environmental Sensing
+    const TEMPERATURE_CHAR_UUID = 0x2a6e;  // Temperature
+
+    const connectButton = document.getElementById('connect');
+    const temperatureEl = document.getElementById('temperature');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    // The BLE Temperature characteristic encodes the value as a signed
+    // 16-bit little-endian integer in units of 0.01 degree Celsius.
+    function decodeTemperature(dataView) {
+      const raw = dataView.getInt16(0, /* littleEndian= */ true);
+      return raw / 100;
+    }
+
+    function handleTemperatureChanged(event) {
+      const value = event.target.value;
+      const celsius = decodeTemperature(value);
+      temperatureEl.textContent = `${celsius.toFixed(1)} \u00b0C`;
+    }
+
+    async function connect() {
+      if (!navigator.bluetooth) {
+        setStatus('この端末/ブラウザは Web Bluetooth に対応していません。Android の Chrome をお使いください。');
+        return;
+      }
+
+      try {
+        connectButton.disabled = true;
+        setStatus('デバイスを検索しています...');
+
+        const device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [ENV_SENSE_SERVICE_UUID] }],
+        });
+
+        device.addEventListener('gattserverdisconnected', () => {
+          setStatus('接続が切断されました。再度接続してください。');
+          connectButton.disabled = false;
+        });
+
+        setStatus(`${device.name || 'デバイス'} に接続しています...`);
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(ENV_SENSE_SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(TEMPERATURE_CHAR_UUID);
+
+        characteristic.addEventListener('characteristicvaluechanged', handleTemperatureChanged);
+        await characteristic.startNotifications();
+
+        // Also show the current value immediately.
+        const initialValue = await characteristic.readValue();
+        handleTemperatureChanged({ target: { value: initialValue } });
+
+        setStatus(`${device.name || 'デバイス'} に接続しました`);
+      } catch (error) {
+        console.error(error);
+        setStatus(`接続に失敗しました: ${error.message}`);
+      } finally {
+        connectButton.disabled = false;
+      }
+    }
+
+    connectButton.addEventListener('click', connect);
+  </script>
+</body>
+</html>
