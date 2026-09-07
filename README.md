@@ -22,6 +22,17 @@ DS18B20 温度センサの測定値を **BLE（Bluetooth Low Energy）** でス�
 | 無線 blob | 必要 | **不要**（BT 内蔵） |
 | 書き込み | `elf2uf2-rs` / `probe-rs` | `espflash` |
 
+## 参考画像
+
+| DS18B20（防水プローブ） | ボード外観 |
+| --- | --- |
+| <img src="docs/images/ds18b20.jpg" width="300" alt="DS18B20 ステンレス防水プローブ"> | <img src="docs/images/boards.jpg" width="300" alt="ESP-WROOM-32D DevKit と Raspberry Pi Pico W"> |
+| ステンレス管の防水型。3 線引き出しで<br>**赤 = VDD / 黒 = GND / 黄 = DQ（データ線）** | 左: ESP-WROOM-32D DevKit<br>右: Raspberry Pi Pico W（ブレッドボード実装） |
+
+> 線色はベンダによって異なる場合があります。接続前にテスタで導通を確認してください。
+> また DQ には **4.7kΩ のプルアップ抵抗（DQ ⇔ 3V3）が必須**です。
+> 実際の結線手順は `environment.md` を参照してください。
+
 ## ブランチ運用
 
 | ブランチ | 役割 |
@@ -38,6 +49,7 @@ DS18B20 温度センサの測定値を **BLE（Bluetooth Low Energy）** でス�
 | `firmware/` | Pico W 向け組込みバイナリ（embassy + cyw43 + trouble-host, `thumbv6m-none-eabi`） |
 | `firmware-esp32/` | ESP-WROOM-32D 向け組込みバイナリ（esp-hal + esp-radio + trouble-host, `xtensa-esp32-none-elf`） |
 | `webapp/` | Web Bluetooth クライアント（Android Chrome から温度取得。HTML + JS 単体、ビルド不要） |
+| `docs/images/` | README で参照する参考画像（ボード・センサ外観） |
 | `scripts/` | CYW43 ファームウェア blob 取得スクリプト等（Pico W 用） |
 | `.github/workflows/` | CI |
 
